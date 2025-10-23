@@ -15,9 +15,6 @@ def calculate_vwap(data):
 
 def calculate_ema(data,period):
 
-    if 'Close' not in data.columns:
-        raise ValueError("The DataFrame must contain a 'Close' column.")
-
     # Calculate EMA9 using pandas' `ewm` method
     data['EMA9'] = data['Close'].ewm(span=period, adjust=False).mean().round(2)
     return data
@@ -75,11 +72,9 @@ def calculate_next_vwap(new_row, historical_df):
         for col in ["Open", "High", "Low", "Close", "Volume"]:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-        # Compute OHLC4 for historical data
-        if not df.empty:
-            df["OHLC4"] = (df["Open"] + df["High"] + df["Low"] + df["Close"]) / 4
-        else:
-            df["OHLC4"] = pd.Series(dtype=float)
+
+        df["OHLC4"] = (df["Open"] + df["High"] + df["Low"] + df["Close"]) / 4
+
 
         # Compute OHLC4 for new row
         new_row_ohlc4 = (new_row[3] + new_row[4] + new_row[5] + new_row[6]) / 4
@@ -101,9 +96,6 @@ def calculate_next_vwap(new_row, historical_df):
         new_row.append(0.0)
         return new_row
 
-    except Exception as e:
-        logging.error(f"Error in calculate_next_vwap_ema9 for {new_row[0]}: {e}")
-        return new_row
 
 def calculate_next_ema9(new_row, historical_df):
     """

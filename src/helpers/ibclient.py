@@ -7,6 +7,10 @@ from ib_async import *
 from .process_incoming_data import process_bar
 from .handle_dataframes import *
 
+from zoneinfo import ZoneInfo
+
+HELSINKI_TZ = ZoneInfo("Europe/Helsinki")
+
 logger = logging.getLogger(__name__)  # module-specific logger
 
 # Tänne tulee IB:n kanssa asioivat koodit
@@ -110,10 +114,13 @@ async def monitor_tickers(  candle_store,
     async def on_bar(bars: list[RealTimeBar], hasNewBar: bool):
             if hasNewBar and bars:
                 bar = bars[-1]
+                        # Convert bar.time (which is UTC) to Helsinki local time
+                bar.time = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(HELSINKI_TZ)
+
                 logging.debug(
-                        f"New 5-sec bar for {symbol} at {(bar.time + timedelta(hours=3)).strftime('%Y-%m-%d %H:%M:%S')}: "
-                        f"Close={bar.close}, Volume={bar.volume}"
-                    )
+                    f"New 5-sec bar for {symbol} at {bar.time.strftime('%Y-%m-%d %H:%M:%S %Z')}: "
+                    f"Close={bar.close}, Volume={bar.volume}"
+                )
                 await process_bar(
                                 candle_store,
                                 project_config,
