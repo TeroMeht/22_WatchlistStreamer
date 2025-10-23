@@ -1,10 +1,12 @@
 import psycopg2
 import pandas as pd
-
+from decimal import Decimal
 from src.common.calculate import *
 
 from datetime import datetime, timedelta
 import logging
+
+import asyncpg
 
 logger = logging.getLogger(__name__)  # module-specific logger
 
@@ -16,6 +18,35 @@ def get_connection_and_cursor(database_config):
         raise Exception("Failed to connect to database.")
     cur = conn.cursor()
     return conn, cur
+
+async def get_async_connection(database_config):
+    """
+    Create and return an async database connection.
+
+    Parameters
+    ----------
+    database_config : dict
+        Dictionary with keys: user, password, database, host, port (optional)
+
+    Returns
+    -------
+    asyncpg.Connection
+    """
+    try:
+        conn = await asyncpg.connect(
+            user=database_config["user"],
+            password=database_config["password"],
+            database=database_config["database"],
+            host=database_config["host"],
+            port=int(database_config.get("port", 5432))
+        )
+        return conn
+    except Exception as e:
+        logging.exception("Failed to create async database connection: %s", e)
+        raise
+
+
+
 
 
 def delete_all_tables_db(database_config):
@@ -139,50 +170,60 @@ def create_and_fill_table(df, database_config):
             conn.close()
 
 
-def save_candlestick_row_to_db(candle_row, database_config):
+async def insert_candlestick_row(candle_row, database_config):
     """
-    Save a single candlestick row to the database if it doesn't already exist.
-    Logs the result and any errors; does not return anything.
+    Async: Save a single candlestick row to the database if it doesn't already exist.
+    Prices are converted to Decimal to avoid float precision issues.
     """
-    conn = cur = None
+    symbol = candle_row[0].lower()
+    conn = None
+
     try:
-        symbol = candle_row[0].lower()  # Table name is the symbol
+        # Convert date and time
+        date_obj = candle_row[1]
+        if isinstance(date_obj, str):
+            date_obj = datetime.strptime(date_obj, "%Y-%m-%d").date()
 
-        # Connect using provided settings
-        conn, cur = get_connection_and_cursor(database_config)
+        time_obj = candle_row[2]
+        if isinstance(time_obj, str):
+            time_obj = datetime.strptime(time_obj, "%H:%M").time()
 
-        # Check if the row already exists
+        # Convert all price fields to Decimal (Open, High, Low, Close, VWAP, EMA9, Relatr)
+        price_fields = [Decimal(str(x)) if x is not None else None for x in candle_row[3:11]]
+        # Rebuild row for database insertion
+        db_row = [candle_row[0], date_obj, time_obj] + price_fields
+
+        # Connect async
+        conn = await get_async_connection(database_config)
+
+        # Check if row exists
         check_sql = f"""
-        SELECT 1 FROM "{symbol}" 
-        WHERE "Symbol"=%s AND "Date"=%s AND "Time"=%s
+        SELECT 1 FROM "{symbol}"
+        WHERE "Symbol"=$1 AND "Date"=$2 AND "Time"=$3
         LIMIT 1;
         """
-        cur.execute(check_sql, (candle_row[0], candle_row[1], candle_row[2]))
-        if cur.fetchone():
+        exists = await conn.fetchrow(check_sql, db_row[0], db_row[1], db_row[2])
+        if exists:
             logging.info("Skipped row (already exists) in table '%s': %s", symbol, candle_row)
             return
 
-        # Insert the row
+        # Insert row
         insert_sql = f"""
         INSERT INTO "{symbol}" 
         ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr")
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11);
         """
-        cur.execute(insert_sql, candle_row)
-        conn.commit()
+        await conn.execute(insert_sql, *db_row)
         logging.info("Inserted row into table '%s': %s", symbol, candle_row)
 
     except Exception as e:
         logging.exception("Error inserting row for '%s': %s", candle_row[0], e)
-        if conn:
-            conn.rollback()
 
     finally:
-        if cur:
-            cur.close()
         if conn:
-            conn.close()
+            await conn.close()
 
+# Function to fetch historical data for a symbol
 # Function to fetch historical data for a symbol
 def fetch_historical_data(symbol, database_config):
     """
@@ -246,98 +287,99 @@ def handle_next_vwap_and_ema9_values(new_row, database_config):
 #-----------------Alarms handling----------------------------------------------------------------
 
 
-# Hakee tietystä taulusta viimeiset rivit ja palauttaa ne pandas DataFrame -muodossa
-def get_last_rows(table_name, num_rows, database_config):
+async def get_last_rows(table_name, num_rows=None, database_config=None):
+    """
+    Fetch the last `num_rows` from the given table asynchronously.
+    If num_rows is None, fetch all available rows.
+    Returns a pandas DataFrame.
+    """
+    conn = None
     try:
-        conn, cursor = get_connection_and_cursor(database_config)
+        conn = await get_async_connection(database_config)
 
-        # Fetch the latest `num_rows` in descending order, then reorder ascending
-        select_query = f"""
-            SELECT * FROM (
-                SELECT * FROM {table_name}
-                ORDER BY "Date" DESC, "Time" DESC
-                LIMIT %s
-            ) AS sub
-            ORDER BY "Date" ASC, "Time" ASC;
-        """
+        if num_rows is None:
+            # Fetch all rows
+            query = f"""
+                SELECT * 
+                FROM "{table_name}"
+                ORDER BY "Date" ASC, "Time" ASC;
+            """
+            rows = await conn.fetch(query)
+        else:
+            # Fetch last num_rows in descending order, then reorder ascending
+            query = f"""
+                SELECT * FROM (
+                    SELECT * FROM "{table_name}"
+                    ORDER BY "Date" DESC, "Time" DESC
+                    LIMIT $1
+                ) sub
+                ORDER BY "Date" ASC, "Time" ASC;
+            """
+            rows = await conn.fetch(query, num_rows)
 
-        cursor.execute(select_query, (num_rows,))
-        rows = cursor.fetchall()
+        if not rows:
+            return pd.DataFrame()
 
-        # Get column names from cursor.description
-        col_names = [desc[0] for desc in cursor.description]
-
-        # Create DataFrame
-        df = pd.DataFrame(rows, columns=col_names)
+        # Convert asyncpg records to DataFrame
+        df = pd.DataFrame([dict(r) for r in rows])
+        return df
 
     except Exception as e:
-        logging.error("Error: %s", e)
-        df = pd.DataFrame()
+        logging.error(f"Error fetching last rows for {table_name}: {e}")
+        return pd.DataFrame()
+
     finally:
-        if cursor:
-            cursor.close()
         if conn:
-            conn.close()
-
-    return df
+            await conn.close()
 
 
 
-# Kirjoittaa tunnistetun alarmin kantaan
-def insert_alarm(symbol, time_obj, alarm_message, date_obj, database_config):
+async def insert_alarm(symbol, time_obj, alarm_message, date_obj, database_config):
+    """Async insert of an alarm into the database."""
+    conn = None
     try:
-        conn, cursor = get_connection_and_cursor(database_config)
+        conn = await get_async_connection(database_config)
 
-        # Insert the new alarm (date and time are separate columns)
         insert_query = """
             INSERT INTO alarms ("Symbol", "Time", "Alarm", "Date")
-            VALUES (%s, %s, %s, %s);
+            VALUES ($1, $2, $3, $4);
         """
-        cursor.execute(insert_query, (symbol, time_obj, alarm_message, date_obj))
-        conn.commit()
-
+        await conn.execute(insert_query, symbol, time_obj, alarm_message, date_obj)
         logging.info("Alarm inserted: %s %s %s", symbol, time_obj, alarm_message)
-
 
     except Exception as e:
         logging.error("Error inserting alarm: %s", e)
     finally:
-        cursor.close()
-        conn.close()
+        if conn:
+            await conn.close()
 
 
-def alarm_exists_recently(symbol, time_obj, date_obj, database_config, cutoff_minutes=15):
+async def alarm_exists_recently(symbol, time_obj, date_obj, database_config, cutoff_minutes=15):
     """
-    Check if there is already an alarm for this symbol within the last `cutoff_minutes`.
-    
-    Returns True if an alarm exists within the cutoff, False otherwise.
+    Async check if an alarm exists for the symbol within the last `cutoff_minutes`.
+    Returns True if exists, False otherwise.
     """
+    conn = None
     try:
-        conn, cursor = get_connection_and_cursor(database_config)
+        conn = await get_async_connection(database_config)
 
-        # Combine incoming date & time to one datetime
         current_dt = datetime.combine(date_obj, time_obj)
         cutoff_dt = current_dt - timedelta(minutes=cutoff_minutes)
 
-        # Query for any alarms after cutoff_dt for this symbol
-        cursor.execute(
-            """
+        query = """
             SELECT 1
             FROM alarms
-            WHERE "Symbol" = %s
-              AND ("Date" > %s
-                   OR ("Date" = %s AND "Time" >= %s))
+            WHERE "Symbol" = $1
+              AND ("Date" > $2
+                   OR ("Date" = $3 AND "Time" >= $4))
             LIMIT 1;
-            """,
-            (symbol, cutoff_dt.date(), cutoff_dt.date(), cutoff_dt.time())
-        )
-        exists = cursor.fetchone() is not None
-
-        return exists
+        """
+        row = await conn.fetchrow(query, symbol, cutoff_dt.date(), cutoff_dt.date(), cutoff_dt.time())
+        return row is not None
 
     except Exception as e:
         logging.error("Error checking alarm existence: %s", e)
-        return False  # If error, default to False (no alarm)
+        return False
     finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
+        if conn:
+            await conn.close()

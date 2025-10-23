@@ -1,9 +1,10 @@
 {
     "host": "127.0.0.1",
     "port": 7497,
+    "port2": 4002,
     "client_id": 0,
     "risk": 100,
-    "capitulation_threshold": 0.50,
+    "capitulation_threshold": 0.5,
     "vwap_distance": 0.1,
     "BOT_TOKEN": "7824990107:AAFwXNYNgjSC3VP8jFzbcE16_Hp19qmQx-4",
     "CHAT_ID": "7892660893"

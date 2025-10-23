@@ -6,8 +6,7 @@ from src.common.read_configs_in import read_database_config, read_project_config
 from src.streamer.datastreamer import run_streamer
 from src.symbol_loader.loader import load_symbols_from_folder
 
-from dash import Dash
-from dash_bootstrap_components.themes import BOOTSTRAP
+
 
 # 1️⃣ Setup logging first
 setup_logging()

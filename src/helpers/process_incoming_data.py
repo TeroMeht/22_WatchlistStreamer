@@ -1,5 +1,5 @@
 
-from src.alarm_logics import *
+from src.alarms import *
 
 from src.database.db_functions import *
 
@@ -47,39 +47,44 @@ async def finalize_candle(store: CandleStore,
     last_candle = handle_next_vwap_and_ema9_values(last_candle, database_config)
     last_candle = calculate_next_relatr(last_candle, atr_value)
 
-    save_candlestick_row_to_db(last_candle, database_config)
+    await insert_candlestick_row(last_candle, database_config)
 
     # run strategy (still in the hot path — you can offload later too)
-    run_strategies(project_config, database_config, last_candle)
+    await run_strategies(project_config, database_config, last_candle)
 
 
-async def process_bar(store: CandleStore,
-                      project_config,
-                      database_config,
-                      atr_value,
-                      symbol: str,
-                      bar: 'RealTimeBar'
-                      ):
-    """Process incoming 5-sec bar into aggregated 2-min candlesticks."""
+async def process_bar(
+    store: CandleStore,
+    project_config: dict,
+    database_config: dict,
+    atr_value: float,
+    symbol: str,
+    bar: 'RealTimeBar'
+):
+    """
+    Process incoming 5-sec bar into aggregated 2-min candlesticks.
+    """
+    bar_time = bar.time + timedelta(hours=3)
+    interval_time = get_2min_interval(bar_time)
+    close_price, volume = bar.close, bar.volume
 
-    time_obj = bar.time + timedelta(hours=3)
-    rounded_time = get_2min_interval(time_obj)
-    price, size = bar.close, bar.volume
+    last_candle = store.get_last(symbol)
 
-    if not store.seen_minute(symbol, rounded_time):
-        store.add_minute(symbol, rounded_time)
+    if not store.seen_minute(symbol, interval_time):
+        store.add_minute(symbol, interval_time)
 
-        if store.get_last(symbol):
-            await finalize_candle(store, project_config, database_config,
-                                  atr_value, symbol, price)
+        if last_candle:
+            asyncio.create_task(
+                finalize_candle(store, project_config, database_config, atr_value, symbol, close_price)
+            )
 
         store.append_candle(symbol, {
-            "minute_dt": rounded_time,
-            "open": price,
-            "high": price,
-            "low": price,
-            "close": price,
-            "volume": size
+            "minute_dt": interval_time,
+            "open": close_price,
+            "high": close_price,
+            "low": close_price,
+            "close": close_price,
+            "volume": volume
         })
     else:
-        store.update_candle(symbol, price, size)
+        store.update_candle(symbol, close_price, volume)
