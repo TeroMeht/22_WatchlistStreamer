@@ -3,8 +3,7 @@ import logging
 
 logger = logging.getLogger(__name__)  # module-specific logger
 
-# in = df (Open, High, Low, Close, Volume)
-# out = df (Open, High, Low, Close, Volume, VWAP)
+
 def calculate_vwap(data):
     data = data.copy()
     data['OHLC4'] = (data['Open'] + data['High'] + data['Low'] + data['Close']) / 4
@@ -13,7 +12,6 @@ def calculate_vwap(data):
     data['VWAP'] = (cumulative_pv / cumulative_vol).fillna(0).round(2)
     data.drop(columns=['OHLC4'], inplace=True)
     return data
-
 
 def calculate_ema(data,period):
 
@@ -49,7 +47,6 @@ def calculate_14day_atr_df(data, period=14):
     df['ATR'] = df['TR'].ewm(span=period, adjust=False).mean().round(4)
 
     return df
-
 
 def calculate_relatr(intraday_df, daily_atr_df):
     intraday_df = intraday_df.copy()
@@ -96,6 +93,7 @@ def calculate_next_vwap(new_row, historical_df):
         # Append VWAP to new_row
         new_row.append(float(vwap_value))
 
+
         return new_row
 
     except Exception as e:
@@ -138,24 +136,24 @@ def calculate_next_ema9(new_row, historical_df):
         return new_row
 
 def calculate_next_relatr(new_row, atr_value):
-    #logging.info(f"Calculating Relatr for {new_row[0]} with ATR {atr_value}")
+    """
+    Calculate the Relatr value for a new candlestick row and append it to the row.
+    """
     try:
-        if atr_value is None or atr_value == 0:
+        if not atr_value:
             logging.warning(f"ATR value missing or zero for {new_row[0]}")
-            new_row.append(None)  # Append None if Relatr can't be calculated
+            new_row.append(None)
             return new_row
 
-        VWAP = new_row[8]
-        Close = new_row[6]
-
-        relatr_value = round((VWAP - Close) / atr_value, 2)
-        new_row.append(float(relatr_value))
-        return new_row
+        # Relatr = (VWAP - Close) / ATR
+        relatr_value = round((new_row[8] - new_row[6]) / atr_value, 2)
+        new_row.append(relatr_value)
 
     except Exception as e:
         logging.error(f"Error calculating Relatr for {new_row[0]}: {e}")
         new_row.append(None)
-        return new_row
+
+    return new_row
     
 
 
