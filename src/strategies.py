@@ -1,5 +1,6 @@
 from src.alarms.alarm_logics import *
 from src.database.db_functions import get_last_rows
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -130,7 +131,11 @@ async def run_strategies(project_config,
     """Run all trading strategies on the finalized candle."""
 
 
-    await reversal_strategy(last_candle, database_config, project_config)
-    await vwapcontinuation_strategy(last_candle, database_config, project_config)
+    await asyncio.gather(
+        reversal_strategy(last_candle, database_config, project_config),
+        vwapcontinuation_strategy(last_candle, database_config, project_config),
+        # reversal_short_strategy(last_candle, database_config, project_config),
+        # exit_strategy(last_candle, database_config, project_config),
+    )
    # await reversal_short_strategy(last_candle, database_config, project_config)
     # exit_strategy(last_candle, database_config, project_config)
