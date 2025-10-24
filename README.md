@@ -1,12 +1,12 @@
-## 22_WatchlistStreamer
+# 22_WatchlistStreamer
 
-# Use case 
+## Use case 
 
 How to monitor multiple stocks in realtime and generate user alarms. There can be overwhelming amount of information when watching multiple stocks moving in US stock market. This can lead to decision fatigue and poor quality decisions.
 Therefore some of that monitoring should be automated. This is attempt to do that. 
 
 
-# Project structure
+## Project structure
 
 alarms folder 
 Responsible for generating alarms and sending telegram messages
@@ -32,4 +32,6 @@ Input data in .txt format is here
 strategies.py is responsible for running multiple strategies on livestream. In some sense this can be considered data consumer.
 
 
-# Software architecture
+## Software architecture
+
+<img width="557" height="407" alt="image" src="https://github.com/user-attachments/assets/4f6b52da-a1d4-4f2d-a4ac-099968bffda9" />
