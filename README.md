@@ -2,8 +2,9 @@
 
 ## Use case 
 
-How to monitor multiple stocks in realtime and generate user alarms. There can be overwhelming amount of information when watching multiple stocks moving in US stock market. This can lead to decision fatigue and poor quality decisions.
-Therefore some of that monitoring should be automated. This is attempt to do that. 
+There can be overwhelming amount of information when watching multiple stocks moving in US stock market. This can lead to decision fatigue and eventually poor decision making. Human brain has only limited capacity to handle multiple decisions. Therefore my conclusion has been the some of this monitoring could and should be automated. This is my attempt to do that. 
+
+How to monitor multiple stocks in realtime and generate user alarms?
 
 
 ## Project structure
@@ -33,6 +34,9 @@ strategies.py is responsible for running multiple strategies on livestream. In s
 
 
 ## Software architecture
+
+Because dozens of tickers may need to be tracked simultaneously, the accumulation of small tasks can become significant. To handle this efficiently, parts of the software have been implemented asynchronously. I have also tried to scale my previous codes as efficiently as possible. We are still not quite there yet, but nowadays I have this common folder where I try to share codes between different projects. 
+
 
 <img width="557" height="407" alt="image" src="https://github.com/user-attachments/assets/4f6b52da-a1d4-4f2d-a4ac-099968bffda9" />
 
