@@ -18,7 +18,7 @@ database folder
 PostgreSQL database communicating codes are here
 
 helpers folder
-Not core codes but essential ones
+Not very clear where they belong
 
 streamer
 Actual data streamer which initilizes database and prepares it for incoming stream data
@@ -35,3 +35,10 @@ strategies.py is responsible for running multiple strategies on livestream. In s
 ## Software architecture
 
 <img width="557" height="407" alt="image" src="https://github.com/user-attachments/assets/4f6b52da-a1d4-4f2d-a4ac-099968bffda9" />
+
+
+## Solution
+
+Define strategies based on historical data collection. Let the code do the heavy lifting and wait for alarms. 
+
+
