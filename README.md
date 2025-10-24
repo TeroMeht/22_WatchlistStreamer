@@ -2,7 +2,8 @@
 
 ## Use case 
 
-There can be overwhelming amount of information when watching multiple stocks moving in US stock market. This can lead to decision fatigue and eventually poor decision making. Human brain has only limited capacity to handle multiple decisions. Therefore my conclusion has been the some of this monitoring could and should be automated. This is my attempt to do that. 
+There can be overwhelming amount of information when watching multiple stocks moving in US stock market. This can lead to decision fatigue and eventually poor decision making. Human brain has only limited capacity to handle multiple decisions. 
+Therefore my conclusion has been the some of this monitoring could and should be automated. This is my attempt to do that. 
 
 How to monitor multiple stocks in realtime and generate user alarms?
 
