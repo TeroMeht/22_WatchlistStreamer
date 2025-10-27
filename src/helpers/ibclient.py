@@ -9,7 +9,6 @@ from .handle_dataframes import *
 
 from zoneinfo import ZoneInfo
 
-HELSINKI_TZ = ZoneInfo("Europe/Helsinki")
 
 logger = logging.getLogger(__name__)  # module-specific logger
 
@@ -70,7 +69,9 @@ async def fetch_history_daily(ib: IB, symbol: str):
     return atr_df
 
 # --- Historical fetch ---
-async def fetch_intraday_history(ib: IB, symbol: str):
+async def fetch_intraday_history(ib: IB, 
+                                 symbol: str,
+                                 time_zone :str):
     logging.info(f"Requesting data for {symbol}")
 
     contract = Stock(symbol, "SMART", "USD")
@@ -86,9 +87,9 @@ async def fetch_intraday_history(ib: IB, symbol: str):
     if not bars:
         logging.warning(f"No historical data returned for {symbol}")
         return None
-
+    
     # Process bars directly using the intraday handler
-    processed_df = handle_incoming_dataframe_intraday(bars, symbol)
+    processed_df = handle_incoming_dataframe_intraday(bars, symbol,time_zone)
 
     return processed_df
         
@@ -115,14 +116,13 @@ async def monitor_tickers(  candle_store,
             if hasNewBar and bars:
                 bar = bars[-1]
                         # Convert bar.time (which is UTC) to Helsinki local time
-                bar.time = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(HELSINKI_TZ)
+                bar.time = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(project_config["timezone"]))
 
                 logging.debug(
-                    f"New 5-sec bar for {symbol} at {bar.time.strftime('%Y-%m-%d %H:%M:%S %Z')}: "
-                    f"Close={bar.close}, Volume={bar.volume}"
+                    f"New 5-sec bar for {symbol} at {bar.time.strftime('%H:%M:%S %Z')}: "
+                    f"Last= {bar.close}, Volume= {bar.volume}"
                 )
-                await process_bar(
-                                candle_store,
+                await process_bar(candle_store,
                                 project_config,
                                 database_config, 
                                 atr,

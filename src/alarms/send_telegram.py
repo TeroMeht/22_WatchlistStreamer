@@ -27,7 +27,7 @@ def safe_print(*args, **kwargs):
         logging.info(msg.encode("ascii", errors="ignore").decode(), **kwargs)
 
 
-def send_telegram_message(symbol, time_obj, alarm_message, bot_token, chat_id):
+async def send_telegram_message(symbol, time_obj, alarm_message, bot_token, chat_id):
     """
     Send a formatted Telegram message.
     This function now handles formatting internally.

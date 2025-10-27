@@ -1,5 +1,4 @@
 from src.common.logging_config import setup_logging
-import logging
 import asyncio
 
 from src.common.read_configs_in import read_database_config, read_project_config
@@ -10,7 +9,7 @@ from src.symbol_loader.loader import load_symbols_from_folder
 
 # 1️Setup logging first
 setup_logging()
-logger = logging.getLogger("main")
+
 
 
 # --- Main entry point ---
