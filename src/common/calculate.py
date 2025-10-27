@@ -45,17 +45,17 @@ def calculate_14day_atr_df(data, period=14):
 
     return df
 
-def calculate_relatr(intraday_df, daily_atr_df):
+def calculate_relatr(intraday_df: pd.DataFrame, 
+                     last_atr_per_symbol: dict) -> pd.DataFrame:
+    """
+    Calculate Relatr for a single intraday DataFrame using a dictionary of last ATR per symbol.
+
+    Relatr = (VWAP - Close) / ATR
+    """
     intraday_df = intraday_df.copy()
-    
-    # Map last ATR per symbol directly
-    last_atr = daily_atr_df.groupby('Symbol')['ATR'].last()
-    intraday_df['LastATR'] = intraday_df['Symbol'].map(last_atr).fillna(1)
-    
-    # Vectorized calculation
-    intraday_df['Relatr'] = ((intraday_df['VWAP'] - intraday_df['Close']) / intraday_df['LastATR']).round(2)
-    intraday_df.drop(columns=['LastATR'], inplace=True)
-    
+    # Map ATR for each row based on Symbol
+    intraday_df['Relatr'] = intraday_df['Symbol'].map(last_atr_per_symbol).fillna(1)
+    intraday_df['Relatr'] = ((intraday_df['VWAP'] - intraday_df['Close']) / intraday_df['Relatr']).round(2)
     return intraday_df
 
 
@@ -95,7 +95,6 @@ def calculate_next_vwap(new_row, historical_df):
         logging.error(f"Error calculating VWAP for {new_row[0]}: {e}")
         new_row.append(0.0)
         return new_row
-
 
 def calculate_next_ema9(new_row, historical_df):
     """

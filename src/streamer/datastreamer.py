@@ -1,4 +1,4 @@
-from src.helpers.candlestore import CandleStore
+
 from src.helpers.ibclient import monitor_tickers
 from src.database.db_functions import delete_all_tables_db, create_and_fill_table
 import asyncio
@@ -10,10 +10,10 @@ from src.common.read_configs_in import *
 
 from src.helpers.utils import *
 from src.strategies import *
-from src.helpers.candlestore import *
+
 from src.helpers.ibclient import *
 from src.helpers.handle_dataframes import *
-
+from src.helpers.process_incoming_data import CandleStore
 
 
 async def run_streamer(symbols, project_config, database_config):
@@ -26,30 +26,32 @@ async def run_streamer(symbols, project_config, database_config):
     delete_all_tables_db(database_config)
 
     ib = IB()
-    await ib.connectAsync(        project_config.get("host"),
-        project_config.get("port"),
-        project_config.get("client_id")
+    await ib.connectAsync(project_config["host"],
+                          project_config["port"],
+                          project_config["clientId"]
     )
 
     tickers = [s[0] if isinstance(s, tuple) else s for s in symbols]
+    time_zone = project_config["timezone"]
 
     logging.info(f"Fetching 2-min intraday data for {len(tickers)} tickers...")
     intraday_results = await asyncio.gather(*[
-        fetch_intraday_history(ib, ticker) for ticker in tickers
+        fetch_intraday_history(ib, ticker,time_zone) for ticker in tickers
     ])
 
     logging.info(f"Fetching 14-day daily historical data for {len(tickers)} tickers...")
-    daily_results = await asyncio.gather(*[
+    daily_results_with_atr = await asyncio.gather(*[
         fetch_history_daily(ib, ticker) for ticker in tickers
     ])
 
-    relatr_datasets = handle_Atr_intraday_dataset(tickers, intraday_results, daily_results)
+    relatr_datasets, last_atr_dict = handle_Atr_intraday_dataset(
+       intraday_results, daily_results_with_atr
+    )
     logging.info("Relatr calculation completed for all tickers.")
 
     for ticker, df in relatr_datasets.items():
         create_and_fill_table(df, database_config)
 
-    last_atr_dict = build_last_atr_dict(tickers, daily_results)
     logging.info("Starting live monitoring...")
 
     live_tasks = [

@@ -123,7 +123,6 @@ async def detect_vwap_setup(df, table_name,database_config, project_config):
             date_obj=last_row["Date"],
             signal_name="VWAP continuation setup",
             close_price=last_row["Close"],
-            table_name=table_name,
             database_config=database_config,
             project_config=project_config
         )
@@ -169,7 +168,6 @@ async def detect_ema_crossover_up(df, table_name, database_config, project_confi
                 date_obj=last_row["Date"],
                 signal_name="EMA9 crossover up",
                 close_price=last_row["Close"],
-                table_name=table_name,
                 database_config=database_config,
                 project_config=project_config
             )
@@ -213,7 +211,6 @@ async def detect_ema_crossover_down(df, table_name, database_config, project_con
                 date_obj=last_row["Date"],
                 signal_name="EMA9 crossover down",
                 close_price=last_row["Close"],
-                table_name=table_name,
                 database_config=database_config,
                 project_config=project_config
             )
@@ -230,8 +227,7 @@ async def detect_ema_crossover_down(df, table_name, database_config, project_con
 # Generate alarm message and insert
 async def generate_signal_alarm(
     symbol, time_obj, date_obj, signal_name, close_price,
-    table_name, database_config, project_config, stop_price=None
-):
+    database_config, project_config):
     """
     Builds and sends an EMA9 crossover alarm if no recent duplicate exists.
   
