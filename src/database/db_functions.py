@@ -2,6 +2,7 @@ import psycopg2
 import pandas as pd
 from decimal import Decimal
 from src.common.calculate import *
+from src.helpers.handle_candles import *
 
 from datetime import datetime, timedelta
 import logging
@@ -49,7 +50,7 @@ def delete_all_tables_db(database_config):
         # Drop each table except 'alarms'
         for table in tables:
             table_name = table[0]
-            if table_name == "alarms":
+            if table_name == "alarms" or "livedata":
                 logging.info(f"Skipping table: {table_name}")
                 continue
             cur.execute(f'DROP TABLE IF EXISTS "{table_name}" CASCADE;')
@@ -201,7 +202,7 @@ async def insert_candlestick_row(last_candle: CandleRow, database_config: dict):
         """
         exists = await conn.fetchrow(check_sql, last_candle.symbol, last_candle.date, last_candle.time)
         if exists:
-            logging.info(f"Skipped duplicate candle for {symbol}: {last_candle.date} {last_candle.time}")
+            logging.info(f"Skipped duplicate candle for {last_candle.symbol}: {last_candle}")
             return
 
         # --- Insert new record ---
@@ -221,15 +222,58 @@ async def insert_candlestick_row(last_candle: CandleRow, database_config: dict):
             await conn.close()
 
 
-async def handle_next_vwap_and_ema9_values(candle: CandleRow, database_config: dict) -> CandleRow:
+async def insert_bulk_livestream(bars: list[dict], database_config: dict):
+    """
+    Bulk insert a list of 5-second RealTimeBars into the 'livedata' table.
+    Each item in `bars` must contain:
+        symbol, time (datetime), last (float), volume (float)
+    """
+    if not bars:
+        return
+
     try:
-        df_from_db = await get_last_rows(table_name=candle.symbol.lower(), num_rows= None, database_config=database_config)
-        candle = calculate_next_vwap(candle, df_from_db)
-        candle = calculate_next_ema9(candle, df_from_db)
-        return candle
+        conn = await get_async_connection(database_config)
+
+        # Create table if it doesn't exist
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS livedata (
+            "Symbol" TEXT NOT NULL,
+            "Date" DATE NOT NULL,
+            "Time" TIMESTAMP WITH TIME ZONE NOT NULL,
+            "Last" DOUBLE PRECISION,
+            "Volume" DOUBLE PRECISION
+        );
+        """
+        await conn.execute(create_table_query)
+
+        # Bulk insert
+        insert_query = """
+            INSERT INTO livedata ("Symbol", "Date", "Time", "Last", "Volume")
+            VALUES ($1, $2, $3, $4, $5)
+        """
+
+        values = []
+        for b in bars:
+            bar_time = b["time"]
+            if not isinstance(bar_time, datetime):
+                raise ValueError(f"Invalid 'time' field: {bar_time}")
+
+            values.append((
+                b["symbol"],
+                b["time"].date(),   # still fine
+                b["time"],          # timezone-aware datetime
+                b["last"],
+                b["volume"]
+            ))
+
+        await conn.executemany(insert_query, values)
+        await conn.close()
+
+        logging.info(f"Inserted {len(bars)} bars into livedata table.")
+
     except Exception as e:
-        logging.exception("Error in handle_next_vwap_and_ema9_values for %s: %s", candle.symbol, e)
-        return candle
+        logging.exception("Error inserting bars into livedata table: %s", e)
+
     
 
 #-----------------Alarms handling----------------------------------------------------------------
@@ -284,7 +328,6 @@ async def get_last_rows(table_name, num_rows=None, database_config=None):
     finally:
         if conn:
             await conn.close()
-
 
 
 async def insert_alarm(symbol, time_obj, alarm_message, date_obj, database_config):

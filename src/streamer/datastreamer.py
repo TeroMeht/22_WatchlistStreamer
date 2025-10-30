@@ -14,7 +14,7 @@ from src.strategies import *
 from src.helpers.ibclient import *
 from src.helpers.handle_dataframes import *
 from src.helpers.process_incoming_data import CandleStore
-
+from src.helpers.handle_barbuffer import BarBuffer
 
 async def run_streamer(symbols, project_config, database_config):
     """
@@ -22,6 +22,8 @@ async def run_streamer(symbols, project_config, database_config):
     """
 
     candle_store = CandleStore()
+    bar_buffer = BarBuffer(batch_size=project_config["barbuffer_size"])
+    
     logging.info("Cleaning up tables in the database...")
     delete_all_tables_db(database_config)
 
@@ -55,7 +57,7 @@ async def run_streamer(symbols, project_config, database_config):
     logging.info("Starting live monitoring...")
 
     live_tasks = [
-        monitor_tickers(
+        monitor_tickers(bar_buffer,
             candle_store,
             project_config,
             database_config,

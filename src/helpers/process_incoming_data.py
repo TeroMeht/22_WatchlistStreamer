@@ -6,53 +6,34 @@ from src.database.db_functions import *
 from src.common.calculate import *
 from src.common.read_configs_in import *
 
-from .handle_dataframes import *
+from .handle_candles import *
+from .handle_barbuffer import *
 from .utils import *
 from .ibclient import *
 
 from src.strategies import *
-
+from zoneinfo import ZoneInfo
 # these codes deal with incoming data and run strategies
 
 
 
-# candlestore.py
-from collections import defaultdict, deque
 
-class CandleStore:
-    def __init__(self, max_candles_per_symbol=5000):
-        self.candlesticks = defaultdict(lambda: deque(maxlen=max_candles_per_symbol))
-        self.minutes_processed = defaultdict(set)
 
-    def get_last(self, symbol):
-        """Return last candle or None."""
-        if self.candlesticks[symbol]:
-            return self.candlesticks[symbol][-1]
-        return None
 
-    def append_candle(self, symbol, candle):
-        """Add a new candle for a symbol."""
-        self.candlesticks[symbol].append(candle)
 
-    def update_candle(self, symbol, price, bar_volume):
-        """Update open candle with new tick/bar data."""
-        current_candle = self.get_last(symbol)
-        if not current_candle:
-            return
 
-        # Update OHLC
-        current_candle['high'] = max(current_candle['high'], price)
-        current_candle['low'] = min(current_candle['low'], price)
-        current_candle['close'] = price
 
-        # Add the 5-sec bar volume to the candle
-        current_candle['volume'] += bar_volume
 
-    def add_minute(self, symbol, minute_dt):
-        self.minutes_processed[symbol].add(minute_dt)
-
-    def seen_minute(self, symbol, minute_dt):
-        return minute_dt in self.minutes_processed[symbol]
+async def handle_incoming_candle(candle: CandleRow, atr_value:float ,database_config: dict) -> CandleRow:
+    try:
+        df_from_db = await get_last_rows(table_name=candle.symbol.lower(), num_rows= None, database_config=database_config)
+        candle = calculate_next_vwap(candle, df_from_db)
+        candle = calculate_next_ema9(candle, df_from_db)
+        candle = calculate_next_relatr(candle, atr_value)
+        return candle
+    except Exception as e:
+        logging.exception("Error in handle_next_vwap_and_ema9_values for %s: %s", candle.symbol, e)
+        return candle
 
 
 
@@ -82,19 +63,19 @@ async def finalize_candle(last_candle,
                             relatR=None
                         )
     # calculations
-    last_candle = await handle_next_vwap_and_ema9_values(last_candle, database_config)
+    last_candle = await handle_incoming_candle(last_candle, atr_value, database_config)
     
-    last_candle = calculate_next_relatr(last_candle, atr_value)
     db_ready_candle = enforce_candle_row_types(last_candle)  # Ensure all floats
-    
-    print(db_ready_candle)
+    logging.debug(last_candle)
+
     await insert_candlestick_row(db_ready_candle,database_config)
     # run strategy (still in the hot path — you can offload later too)
     await run_strategies(last_candle,project_config, database_config)
 
 
 
-async def process_bar(store: CandleStore,
+async def process_bar(bar_buffer: BarBuffer,
+                      store: CandleStore,
                       project_config: dict,
                       database_config: dict,
                       atr_value: float,
@@ -109,10 +90,18 @@ async def process_bar(store: CandleStore,
     interval_time = get_2min_interval(bar_time_local)
     last_candle = store.get_last(symbol)
 
-    logging.debug(
-    f"New 5-sec bar for {symbol} at {bar_time_local.strftime('%H:%M:%S %Z')}: "
-    f"Last= {bar.close}, Volume= {bar.volume}"
-)
+    logging.debug(f"New 5-sec bar for {symbol} at {bar_time_local.strftime('%H:%M:%S %Z')}: "
+    f"Last= {bar.close}, Volume= {bar.volume}")
+    # prepare bar dict
+    bar_data = {
+        "symbol": symbol,
+        "time": bar_time_local,
+        "last": bar.close,
+        "volume": bar.volume
+    }
+
+    # # add to buffer; will auto-flush when batch_size reached
+    await bar_buffer.add(bar_data, insert_bulk_livestream, database_config)
 
     if not store.seen_minute(symbol, interval_time):
         store.add_minute(symbol, interval_time)
