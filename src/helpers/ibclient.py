@@ -7,7 +7,6 @@ from ib_async import *
 from .process_incoming_data import process_bar
 from .handle_dataframes import *
 
-from zoneinfo import ZoneInfo
 
 
 logger = logging.getLogger(__name__)  # module-specific logger
@@ -97,7 +96,8 @@ async def fetch_intraday_history(ib: IB,
 
 
 # --- Real-time monitoring loop ---
-async def monitor_tickers(  candle_store,
+async def monitor_tickers(  bar_buffer,
+                            candle_store,
                             project_config,
                             database_config,
                             atr,
@@ -117,7 +117,8 @@ async def monitor_tickers(  candle_store,
                 bar = bars[-1]
 
 
-                await process_bar(candle_store,
+                await process_bar(bar_buffer,
+                                candle_store,
                                 project_config,
                                 database_config, 
                                 atr,

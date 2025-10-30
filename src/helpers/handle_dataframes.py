@@ -2,6 +2,7 @@ from src.common.calculate import *
 import pandas as pd
 import logging
 from typing import Optional, List,Dict
+from src.database.db_functions import *
 
 # Tämä on erillinen koodikirjasto jolla käsittelen sisään tulevia bars dataa pandas dataframeiksi
 logger = logging.getLogger(__name__)  # module-specific logger
@@ -174,3 +175,8 @@ def handle_Atr_intraday_dataset(intraday_results: list[pd.DataFrame],
         logger.info(f"{symbol} - last 10 rows:\n{intraday_df.tail(10)}")
 
     return relatr_datasets, last_atr_per_symbol
+
+
+
+
+

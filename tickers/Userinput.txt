@@ -1,1 +1,1 @@
-sofi,ccj,meta
+pltr,tsla,googl,nvda

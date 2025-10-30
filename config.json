@@ -9,5 +9,6 @@
     "BOT_TOKEN": "7824990107:AAFwXNYNgjSC3VP8jFzbcE16_Hp19qmQx-4",
     "CHAT_ID": "7892660893",
     "tickers_folder" : "./tickers",
-    "timezone" : "Europe/Helsinki"
+    "timezone" : "Europe/Helsinki",
+    "barbuffer_size" : 1000
 }
