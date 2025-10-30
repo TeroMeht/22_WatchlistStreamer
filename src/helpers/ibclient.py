@@ -115,13 +115,8 @@ async def monitor_tickers(  candle_store,
     async def on_bar(bars: list[RealTimeBar], hasNewBar: bool):
             if hasNewBar and bars:
                 bar = bars[-1]
-                        # Convert bar.time (which is UTC) to Helsinki local time
-                bar.time = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(project_config["timezone"]))
 
-                logging.debug(
-                    f"New 5-sec bar for {symbol} at {bar.time.strftime('%H:%M:%S %Z')}: "
-                    f"Last= {bar.close}, Volume= {bar.volume}"
-                )
+
                 await process_bar(candle_store,
                                 project_config,
                                 database_config, 
