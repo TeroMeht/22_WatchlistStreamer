@@ -1,1 +1,1 @@
-pltr,tsla,googl,nvda
+meta,nvda,googl,tsla,amd
