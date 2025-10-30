@@ -25,7 +25,7 @@ async def reversal_strategy(candle: CandleRow, project_config:dict,database_conf
 
     # Check for capitulation using the DataFrame
     if detect_capitulation(df, threshold=project_config["capitulation_threshold"]):
-        logger.info("Capitulation detected for symbol: %s. Checking EMA9 crossover...", symbol)
+        logger.debug("Capitulation detected for symbol: %s. Checking EMA9 crossover...", symbol)
 
         # Check EMA9 crossover using last 2 rows from the same DataFrame
         await detect_ema_crossover_up(
@@ -52,7 +52,7 @@ async def reversal_short_strategy(candle: CandleRow, project_config:dict,databas
 
     # Check for euphoria using the DataFrame
     if detect_euforia(df, threshold=project_config["capitulation_threshold"]):
-        logger.info("Euphoria detected for symbol: %s. Checking EMA9 crossover down...", candle.symbol)
+        logger.debug("Euphoria detected for symbol: %s. Checking EMA9 crossover down...", candle.symbol)
 
         # Check EMA9 crossover using last 2 rows from the same DataFrame
         await detect_ema_crossover_down(
@@ -81,15 +81,15 @@ async def vwapcontinuation_strategy(candle: CandleRow, project_config:dict,datab
     df_latest = df_all.tail(1)
 
     if not is_vwap_close(df_latest, project_config["vwap_distance"]):
-        logger.info("Price not close to VWAP for symbol: %s, skipping euforia check.", candle.symbol)
+        logger.debug("Price not close to VWAP for symbol: %s, skipping euforia check.", candle.symbol)
         return
 
-    logger.info(f"{candle.symbol}: Price is close to VWAP, checking for past euforia...")
+    logger.debug(f"{candle.symbol}: Price is close to VWAP, checking for past euforia...")
 
 
     # Detect euforia
     if detect_euforia(df_all, threshold=project_config["capitulation_threshold"]):
-        logger.info(f"Euforia detected for symbol: {candle.symbol} near VWAP, triggering VWAP setup alarm...")
+        logger.info(f"Euforia detected earlier for symbol: {candle.symbol} near VWAP, triggering VWAP setup alarm...")
 
         # Trigger VWAP setup alarm
         await detect_vwap_setup(
