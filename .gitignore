@@ -9,3 +9,5 @@ database.ini
 __pycache__/
 *.py[cod]
 *$py.class
+
+tickers/

@@ -65,29 +65,33 @@ async def finalize_candle(last_candle,
                           price):
     """Finalize previous candle, enqueue DB write, and run strategy checks."""
 
-    # Update close price
+    # 1️⃣ Update close price
     last_candle['close'] = price
 
-    candle_dt = last_candle["minute_dt"]
-
-    last_candle = [
-        symbol,
-        candle_dt.date().isoformat(),
-        candle_dt.strftime("%H:%M"),
-        last_candle["open"],
-        last_candle["high"],
-        last_candle["low"],
-        last_candle["close"],
-        last_candle["volume"],  # already cumulative from update_candle()
-    ]
+    # 2️⃣ Build CandleRow with known values
+    last_candle = CandleRow(symbol=symbol,
+                            date=last_candle["minute_dt"].date(),
+                            time=last_candle["minute_dt"].time(),
+                            open=last_candle["open"],
+                            high=last_candle["high"],
+                            low=last_candle["low"],
+                            close=last_candle["close"],
+                            volume=last_candle["volume"],
+                            vwap=None,  # to be calculated
+                            ema9=None,
+                            relatR=None
+                        )
     # calculations
-    last_candle = handle_next_vwap_and_ema9_values(last_candle, database_config)
+    last_candle = await handle_next_vwap_and_ema9_values(last_candle, database_config)
+    
     last_candle = calculate_next_relatr(last_candle, atr_value)
-
-    await insert_candlestick_row(last_candle, database_config)
-
+    db_ready_candle = enforce_candle_row_types(last_candle)  # Ensure all floats
+    
+    print(db_ready_candle)
+    await insert_candlestick_row(db_ready_candle,database_config)
     # run strategy (still in the hot path — you can offload later too)
-    await run_strategies(project_config, database_config, last_candle)
+    await run_strategies(last_candle,project_config, database_config)
+
 
 
 async def process_bar(store: CandleStore,
@@ -99,11 +103,16 @@ async def process_bar(store: CandleStore,
     """
     Process incoming 5-sec bar into aggregated 2-min candlesticks.
     """
+    # --- Convert time to configured timezone here ---
 
-    interval_time = get_2min_interval(bar.time)
-
-
+    bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(project_config["timezone"]))
+    interval_time = get_2min_interval(bar_time_local)
     last_candle = store.get_last(symbol)
+
+    logging.debug(
+    f"New 5-sec bar for {symbol} at {bar_time_local.strftime('%H:%M:%S %Z')}: "
+    f"Last= {bar.close}, Volume= {bar.volume}"
+)
 
     if not store.seen_minute(symbol, interval_time):
         store.add_minute(symbol, interval_time)

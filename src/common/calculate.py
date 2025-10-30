@@ -1,6 +1,6 @@
 import pandas as pd
 import logging
-
+from src.helpers.utils import *
 logger = logging.getLogger(__name__)  # module-specific logger
 
 
@@ -59,93 +59,52 @@ def calculate_relatr(intraday_df: pd.DataFrame,
     return intraday_df
 
 
-
-
-
-
-# Dynaamiset laskennat sisään tulevalle riville
-def calculate_next_vwap(new_row, historical_df):
-
+def calculate_next_vwap(candle: CandleRow, historical_df: pd.DataFrame) -> CandleRow:
     try:
-        # Ensure numeric types
         df = historical_df.copy()
-        for col in ["Open", "High", "Low", "Close", "Volume"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-
-
         df["OHLC4"] = (df["Open"] + df["High"] + df["Low"] + df["Close"]) / 4
 
+        new_ohlc4 = (candle.open + candle.high + candle.low + candle.close) / 4
+        cumulative_volume = df["Volume"].sum() + candle.volume
+        cumulative_price_volume = (df["OHLC4"] * df["Volume"]).sum() + (new_ohlc4 * candle.volume)
 
-        # Compute OHLC4 for new row
-        new_row_ohlc4 = (new_row[3] + new_row[4] + new_row[5] + new_row[6]) / 4
-
-        # Cumulative VWAP calculation
-        cumulative_volume = df["Volume"].sum() + float(new_row[7])
-        cumulative_price_volume = (df["OHLC4"] * df["Volume"]).sum() + (new_row_ohlc4 * float(new_row[7]))
-
-        vwap_value = round(cumulative_price_volume / cumulative_volume, 2) if cumulative_volume != 0 else 0.0
-
-        # Append VWAP to new_row
-        new_row.append(float(vwap_value))
-
-
-        return new_row
+        candle.vwap = round(cumulative_price_volume / cumulative_volume, 2) if cumulative_volume else 0.0
 
     except Exception as e:
-        logging.error(f"Error calculating VWAP for {new_row[0]}: {e}")
-        new_row.append(0.0)
-        return new_row
+        logging.exception("Error calculating VWAP for %s: %s", candle.symbol, e)
+        candle.vwap = 0.0
 
-def calculate_next_ema9(new_row, historical_df):
-    """
-    Calculate EMA9 for a new_row based on historical_df using pandas ewm.
-    Appends the EMA9 value to new_row.
-    """
+    return candle
+
+
+def calculate_next_ema9(candle: CandleRow, historical_df: pd.DataFrame) -> CandleRow:
     try:
-        # Build a DataFrame including historical data + new row
         df = historical_df.copy()
 
-        # Ensure 'Close' is numeric
-        df["Close"] = pd.to_numeric(df["Close"], errors="coerce").fillna(0)
-
-        # Append new row Close
-        new_close = float(new_row[6])  # Close is at index 6
-        new_row_df = pd.DataFrame([{"Close": new_close}])
+        new_row_df = pd.DataFrame([{"Close": candle.close}])
         df = pd.concat([df[["Close"]], new_row_df], ignore_index=True)
 
-        # Calculate EMA9
         df["EMA9"] = df["Close"].ewm(span=9, adjust=False).mean().round(2)
 
-        # Append the latest EMA9 to new_row
-        new_row.append(float(df["EMA9"].iloc[-1]))
-
-        return new_row
+        candle.ema9 = float(df["EMA9"].iloc[-1])
 
     except Exception as e:
-        logging.error(f"Error calculating EMA9 for {new_row[0]}: {e}")
-        new_row.append(0.0)
-        return new_row
+        logging.exception("Error calculating EMA9 for %s: %s", candle.symbol, e)
+        candle.ema9 = 0.0
 
-def calculate_next_relatr(new_row, atr_value):
-    """
-    Calculate the Relatr value for a new candlestick row and append it to the row.
-    """
+    return candle
+
+
+def calculate_next_relatr(candle: CandleRow, atr_value: float) -> CandleRow:
     try:
-        if not atr_value:
-            logging.warning(f"ATR value missing or zero for {new_row[0]}")
-            new_row.append(None)
-            return new_row
-
-        # Relatr = (VWAP - Close) / ATR
-        relatr_value = round((new_row[8] - new_row[6]) / atr_value, 2)
-        new_row.append(relatr_value)
+        candle.relatR = round((candle.vwap - candle.close) / atr_value, 2)
 
     except Exception as e:
-        logging.error(f"Error calculating Relatr for {new_row[0]}: {e}")
-        new_row.append(None)
+        logging.exception("Error calculating RelATR for %s: %s", candle.symbol, e)
+        candle.relatR = 0.0
 
-    return new_row
-    
+    return candle
+
 
 
 

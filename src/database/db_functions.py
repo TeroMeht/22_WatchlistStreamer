@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import logging
 
 import asyncpg
+from src.helpers.utils import *
 
 logger = logging.getLogger(__name__)  # module-specific logger
 
@@ -18,36 +19,6 @@ def get_connection_and_cursor(database_config):
         raise Exception("Failed to connect to database.")
     cur = conn.cursor()
     return conn, cur
-
-async def get_async_connection(database_config):
-    """
-    Create and return an async database connection.
-
-    Parameters
-    ----------
-    database_config : dict
-        Dictionary with keys: user, password, database, host, port (optional)
-
-    Returns
-    -------
-    asyncpg.Connection
-    """
-    try:
-        conn = await asyncpg.connect(
-            user=database_config["user"],
-            password=database_config["password"],
-            database=database_config["database"],
-            host=database_config["host"],
-            port=int(database_config.get("port", 5432))
-        )
-        return conn
-    except Exception as e:
-        logging.exception("Failed to create async database connection: %s", e)
-        raise
-
-
-
-
 
 def delete_all_tables_db(database_config):
     conn = None
@@ -99,7 +70,6 @@ def delete_all_tables_db(database_config):
         if conn:
             conn.close()
 
-
 # History data fill
 def create_and_fill_table(df, database_config):
     
@@ -127,19 +97,19 @@ def create_and_fill_table(df, database_config):
 
         # Build SQL with capitalized column names
         create_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            "Symbol" TEXT NOT NULL,
-            "Date" DATE NOT NULL,
-            "Time" TIME NOT NULL,
-            "Open" NUMERIC,
-            "High" NUMERIC,
-            "Low" NUMERIC,
-            "Close" NUMERIC,
-            "Volume" NUMERIC,
-            "VWAP" NUMERIC,
-            "EMA9" NUMERIC,
-            "Relatr" NUMERIC
-        );
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                "Symbol" TEXT NOT NULL,
+                "Date" DATE NOT NULL,
+                "Time" TIME NOT NULL,
+                "Open" NUMERIC(10, 2),
+                "High" NUMERIC(10, 2),
+                "Low" NUMERIC(10, 2),
+                "Close" NUMERIC(10, 2),
+                "Volume" NUMERIC(18, 2),
+                "VWAP" NUMERIC(10, 2),
+                "EMA9" NUMERIC(10, 2),
+                "Relatr" NUMERIC(10, 2)
+            );
         """
 
         insert_sql = f"""
@@ -170,118 +140,96 @@ def create_and_fill_table(df, database_config):
             conn.close()
 
 
-async def insert_candlestick_row(candle_row, database_config):
+
+async def get_async_connection(database_config):
+    """
+    Create and return an async database connection.
+
+    Parameters
+    ----------
+    database_config : dict
+        Dictionary with keys: user, password, database, host, port (optional)
+
+    Returns
+    -------
+    asyncpg.Connection
+    """
+    try:
+        conn = await asyncpg.connect(
+            user=database_config["user"],
+            password=database_config["password"],
+            database=database_config["database"],
+            host=database_config["host"],
+            port=int(database_config.get("port", 5432))
+        )
+        return conn
+    except Exception as e:
+        logging.exception("Failed to create async database connection: %s", e)
+        raise
+
+
+async def insert_candlestick_row(last_candle: CandleRow, database_config: dict):
     """
     Async: Save a single candlestick row to the database if it doesn't already exist.
-    Prices are converted to Decimal to avoid float precision issues.
+    Uses CandleRow dataclass for type safety and Decimal precision.
     """
-    symbol = candle_row[0].lower()
-    conn = None
+
+    symbol = last_candle.symbol.lower()
+    conn = await get_async_connection(database_config)
 
     try:
-        # Convert date and time
-        date_obj = candle_row[1]
-        if isinstance(date_obj, str):
-            date_obj = datetime.strptime(date_obj, "%Y-%m-%d").date()
+        # Convert CandleRow → tuple for DB insertion
+        db_row = (
+            last_candle.symbol,
+            last_candle.date,
+            last_candle.time,
+            last_candle.open,
+            last_candle.high,
+            last_candle.low,
+            last_candle.close,
+            last_candle.volume,
+            last_candle.vwap,
+            last_candle.ema9,
+            last_candle.relatR,
+        )
 
-        time_obj = candle_row[2]
-        if isinstance(time_obj, str):
-            time_obj = datetime.strptime(time_obj, "%H:%M").time()
-
-        # Convert all price fields to Decimal (Open, High, Low, Close, VWAP, EMA9, Relatr)
-        price_fields = [Decimal(str(x)) if x is not None else None for x in candle_row[3:11]]
-        # Rebuild row for database insertion
-        db_row = [candle_row[0], date_obj, time_obj] + price_fields
-
-        # Connect async
-        conn = await get_async_connection(database_config)
-
-        # Check if row exists
+        # --- Check if record already exists ---
         check_sql = f"""
         SELECT 1 FROM "{symbol}"
         WHERE "Symbol"=$1 AND "Date"=$2 AND "Time"=$3
         LIMIT 1;
         """
-        exists = await conn.fetchrow(check_sql, db_row[0], db_row[1], db_row[2])
+        exists = await conn.fetchrow(check_sql, last_candle.symbol, last_candle.date, last_candle.time)
         if exists:
-            logging.info("Skipped row (already exists) in table '%s': %s", symbol, candle_row)
+            logging.info(f"Skipped duplicate candle for {symbol}: {last_candle.date} {last_candle.time}")
             return
 
-        # Insert row
+        # --- Insert new record ---
         insert_sql = f"""
         INSERT INTO "{symbol}" 
         ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr")
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11);
         """
         await conn.execute(insert_sql, *db_row)
-        logging.info("Inserted row into table '%s': %s", symbol, candle_row)
+        logging.info(f"Inserted candle into '{symbol}': {last_candle}")
 
     except Exception as e:
-        logging.exception("Error inserting row for '%s': %s", candle_row[0], e)
+        logging.exception(f" Error inserting row for {last_candle.symbol}: {e}")
 
     finally:
         if conn:
             await conn.close()
 
-# Function to fetch historical data for a symbol
-# Function to fetch historical data for a symbol
-def fetch_historical_data(symbol, database_config):
-    """
-    Fetch all historical rows for a given symbol from the database
-    and return as a DataFrame with proper numeric types.
-    """
-    symbol_lower = symbol.lower()
-    columns = ["Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr"]
 
+async def handle_next_vwap_and_ema9_values(candle: CandleRow, database_config: dict) -> CandleRow:
     try:
-        conn, cur = get_connection_and_cursor(database_config)
-        cur.execute(f"""
-            SELECT "Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr"
-            FROM "{symbol_lower}"
-            ORDER BY "Date", "Time";
-        """)
-        rows = cur.fetchall()
-
-        if rows:
-            df = pd.DataFrame(rows, columns=columns)
-            # Ensure numeric columns are proper type
-            for col in ["Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr"]:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-        else:
-            df = pd.DataFrame(columns=columns)
-
-        return df
-
+        df_from_db = await get_last_rows(table_name=candle.symbol.lower(), num_rows= None, database_config=database_config)
+        candle = calculate_next_vwap(candle, df_from_db)
+        candle = calculate_next_ema9(candle, df_from_db)
+        return candle
     except Exception as e:
-        logging.error(f"Error fetching historical data for {symbol_lower}: {e}")
-        return pd.DataFrame(columns=columns)
-
-    finally:
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
-
-
-def handle_next_vwap_and_ema9_values(new_row, database_config):
-    """
-    Prepare a new_row by fetching historical data and calculating VWAP & EMA9.
-    """
-    try:
-        # Fetch historical data using the reusable function
-        df = fetch_historical_data(new_row[0], database_config)
-
-        # Calculate VWAP
-        new_row = calculate_next_vwap(new_row, df)
-
-        # Calculate EMA9
-        new_row = calculate_next_ema9(new_row, df)
-
-        return new_row
-
-    except Exception as e:
-        logging.error(f"Error in handle_next_vwap_and_ema9_values for {new_row[0]}: {e}")
-        return new_row
+        logging.exception("Error in handle_next_vwap_and_ema9_values for %s: %s", candle.symbol, e)
+        return candle
     
 
 #-----------------Alarms handling----------------------------------------------------------------
@@ -322,6 +270,11 @@ async def get_last_rows(table_name, num_rows=None, database_config=None):
 
         # Convert asyncpg records to DataFrame
         df = pd.DataFrame([dict(r) for r in rows])
+                # 🔧 Convert numeric columns (which come as Decimal) to float
+        numeric_cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = df[col].astype(float)
         return df
 
     except Exception as e:
