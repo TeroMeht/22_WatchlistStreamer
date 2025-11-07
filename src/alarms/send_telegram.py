@@ -52,3 +52,46 @@ async def send_telegram_message(symbol, time_obj, alarm_message, bot_token, chat
     except Exception as e:
         safe_print(f"Error sending Telegram message: {e}, raw response: {response.text}")
         return {"ok": False, "error": str(e)}
+    
+
+
+
+
+async def send_telegram_picture(project_config: dict, image_bytes, alarm_message:str)-> dict:
+    """
+    Send a picture to a Telegram chat from a byte object (in-memory image),
+    with optional caption text.
+    
+    :param bot_token: Telegram bot token
+    :param chat_id: Chat ID where the image will be sent
+    :param image_bytes: Image in byte format
+    :param caption: Optional text caption to send with the image
+    """
+    telegram_endpoint = f"https://api.telegram.org/bot{project_config["BOT_TOKEN"]}/sendPhoto"
+    
+    try:
+        # Prepare the payload for the request
+        image_payload = {
+            "chat_id": project_config["CHAT_ID"],
+            "caption": alarm_message  # Add caption if provided
+        }
+
+        # Send the image in-memory (as bytes)
+        files = {
+            'photo': ('image.png', image_bytes, 'image/png')
+        }
+
+        # Send the request
+        response = requests.post(telegram_endpoint, data=image_payload, files=files)
+        result = response.json()
+
+        if result.get("ok"):
+            logger.info(f"Image sent successfully: {result}")
+        else:
+            logger.error(f"Error sending image: {result}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error sending image to Telegram: {e}")
+        return {"ok": False, "error": str(e)}
