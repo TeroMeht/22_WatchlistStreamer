@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 from typing import Optional, List,Dict
 from src.database.db_functions import *
+import numpy as np
 
 # Tämä on erillinen koodikirjasto jolla käsittelen sisään tulevia bars dataa pandas dataframeiksi
 logger = logging.getLogger(__name__)  # module-specific logger
@@ -51,8 +52,7 @@ def incoming_bars_to_datamodel_format(bars) -> List[IncomingBar]:
 
 
 
-def intraday_datapipe(bars: List[IncomingBar],
-                      time_zone:str) -> pd.DataFrame:
+def intraday_datapipe(bars: List[IncomingBar], time_zone:str) -> pd.DataFrame:
     """
     Convert a list of IncomingBar dataclasses to a pandas DataFrame.
     Keeps datetime as timezone-aware and capitalizes all column names.
@@ -95,9 +95,7 @@ def daily_datapipe(bars: List[IncomingBar]) -> pd.DataFrame:
     return df
 
 
-def handle_incoming_dataframe_intraday(bars: List[IncomingBar], 
-                                       symbol:str,
-                                       time_zone:str)-> pd.DataFrame:
+def handle_incoming_dataframe_intraday(bars: List[IncomingBar], symbol:str, time_zone:str)-> pd.DataFrame:
     """
     Process IBKR bars into a pandas DataFrame (or dataclasses if needed):
     - Adjust timezone
@@ -115,8 +113,11 @@ def handle_incoming_dataframe_intraday(bars: List[IncomingBar],
     # Step 5: Calculate indicators
     df = calculate_vwap(df)
     df = calculate_ema(df, period=9)
-
-
+    # --- Reorder columns ---
+    desired_order = [
+        "Symbol","Date", "Time","Open", "High", "Low", "Close", "Volume","VWAP", "EMA9"
+    ]
+    df = df[desired_order]
     return df
 
 def handle_incoming_dataframe_daily(bars: List[IncomingBar], symbol:str)-> pd.DataFrame:
@@ -143,6 +144,26 @@ def handle_incoming_dataframe_daily(bars: List[IncomingBar], symbol:str)-> pd.Da
     logger.info(df.tail(10))
     return df
 
+def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:str, time_zone:str)-> pd.DataFrame:
+
+    # Step 1: Convert to dataclasses
+    incoming_bars = incoming_bars_to_datamodel_format(bars)
+
+    # Step 2: Convert to DataFrame
+    df = intraday_datapipe(incoming_bars,time_zone)
+
+    # Step 4: Assign symbol
+    df["Symbol"] = symbol
+
+    # --- Reorder columns ---
+    desired_order = [
+        "Symbol","Date","Time", "Open", "High", "Low", "Close", "Volume"]
+    
+    df = df[desired_order]
+    # Step 5: Calculate average volume model
+    df = calculate_avg_volume_model([df])
+
+    return df
 
 
 
@@ -154,29 +175,85 @@ def build_last_atr_dict(daily_results_with_atr: List[pd.DataFrame]) -> Dict[str,
     """
     return {df['Symbol'].iloc[0]: df['ATR'].iloc[-1] for df in daily_results_with_atr}
 
-def handle_Atr_intraday_dataset(intraday_results: list[pd.DataFrame],
-                                daily_results_with_atr: list[pd.DataFrame]) -> tuple[dict[str, pd.DataFrame], dict[str, float]]:
+def handle_Atr_intraday_dataset(
+    intraday_results: dict[str, pd.DataFrame],
+    daily_results_with_atr: list[pd.DataFrame]
+) -> tuple[dict[str, pd.DataFrame], dict[str, float]]:
+    """
+    Build intraday datasets including existing RVOL and calculated Relatr.
 
+    Parameters
+    ----------
+    intraday_results : dict
+        Dictionary keyed by symbol containing intraday DataFrames (with RVOL already).
+    daily_results_with_atr : list[pd.DataFrame]
+        Daily ATR results to build last ATR per symbol.
+
+    Returns
+    -------
+    relatr_datasets : dict
+        Dictionary keyed by symbol containing intraday DataFrames with Relatr added.
+    last_atr_per_symbol : dict
+        Dictionary of last ATR value per symbol.
+    """
     relatr_datasets = {}
-    last_atr_per_symbol = build_last_atr_dict(daily_results_with_atr)
-    
-    cols_order = ['Symbol', 'Date', 'Time', 'Open', 'High', 'Low', 
-                  'Close', 'Volume', 'VWAP', 'EMA9', 'Relatr']
 
-    for intraday_df in intraday_results:
+    # Build last ATR dictionary
+    last_atr_per_symbol = build_last_atr_dict(daily_results_with_atr)
+
+    # Desired column order
+    cols_order = [
+        'Symbol', 'Date', 'Time', 'Open', 'High', 'Low', 'Close',
+        'Volume', 'VWAP', 'EMA9', 'Avg_volume', 'Rvol', 'Relatr'
+    ]
+
+    # Iterate over symbol, intraday_df pairs
+    for symbol, intraday_df in intraday_results.items():
+        if intraday_df is None or intraday_df.empty:
+            logger.warning(f"Empty intraday DataFrame for {symbol}, skipping.")
+            continue
+
+        # Calculate Relatr using the existing intraday DataFrame
+        intraday_df = calculate_relatr(intraday_df, last_atr_per_symbol)
+
+        # Reorder columns
+        intraday_df = intraday_df[cols_order]
+
+        relatr_datasets[symbol] = intraday_df
+        logger.debug(f"{symbol} - last 10 rows:\n{intraday_df.tail(10)}")
+
+    return relatr_datasets, last_atr_per_symbol
+
+def handle_intraday_rvol_dataset(intraday_results: list[pd.DataFrame], avg_volume_results_5d: list[pd.DataFrame]) -> pd.DataFrame:
+
+    rvol_datasets = {}
+
+    for intraday_df, avg_volume_df in zip(intraday_results, avg_volume_results_5d):
         if intraday_df is None or intraday_df.empty:
             logger.warning("Empty intraday DataFrame, skipping.")
             continue
         
         symbol = intraday_df['Symbol'].iloc[0]
-        intraday_df = calculate_relatr(intraday_df, last_atr_per_symbol)
-        intraday_df = intraday_df[cols_order]
-        relatr_datasets[symbol] = intraday_df
-        logger.info(f"{symbol} - last 10 rows:\n{intraday_df.tail(10)}")
 
-    return relatr_datasets, last_atr_per_symbol
+        # Ensure avg_volume_df has the necessary columns
+        required_cols = ['Symbol', 'Time', 'Avg_volume']
+        for col in required_cols:
+            if col not in avg_volume_df.columns:
+                logger.error(f"Avg volume DataFrame for {symbol} missing column: {col}")
+                continue
 
+        # Merge intraday with avg volume on Symbol, Date, Time
+        merged_df = pd.merge(
+            intraday_df,
+            avg_volume_df[required_cols],
+            on=['Symbol', 'Time'],
+            how='left'
+        )
+        merged_df = calculate_rvol(merged_df)
 
+        rvol_datasets[symbol] = merged_df
+        logger.info(f"{symbol} - last 10 rows with Rvol:\n{merged_df.tail(10)}")
 
+    return rvol_datasets
 
 

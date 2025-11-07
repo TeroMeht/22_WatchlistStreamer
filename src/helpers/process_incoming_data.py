@@ -24,12 +24,17 @@ from zoneinfo import ZoneInfo
 
 
 
-async def handle_incoming_candle(candle: CandleRow, atr_value:float ,database_config: dict) -> CandleRow:
+async def handle_incoming_candle(candle: CandleRow, atr_value:float ,database_config: dict, database_avgvolume_config: dict) -> CandleRow:
     try:
-        df_from_db = await get_last_rows(table_name=candle.symbol.lower(), num_rows= None, database_config=database_config)
+        df_from_db, avg_volume = await asyncio.gather(
+            get_last_rows(table_name=candle.symbol.lower(), num_rows=None, database_config=database_config),
+            fetch_avg_volume_for_candle(candle, database_avgvolume_config)
+        )
+        candle.avg_volume = avg_volume
         candle = calculate_next_vwap(candle, df_from_db)
         candle = calculate_next_ema9(candle, df_from_db)
         candle = calculate_next_relatr(candle, atr_value)
+        candle = calculate_next_rvol(candle, candle.avg_volume)
         return candle
     except Exception as e:
         logging.exception("Error in handle_next_vwap_and_ema9_values for %s: %s", candle.symbol, e)
@@ -41,6 +46,7 @@ async def handle_incoming_candle(candle: CandleRow, atr_value:float ,database_co
 async def finalize_candle(last_candle,
                           project_config: dict,
                           database_config: dict,
+                          database_avgvolume_config: dict,
                           atr_value: float,
                           symbol: str,
                           price):
@@ -60,16 +66,21 @@ async def finalize_candle(last_candle,
                             volume=last_candle["volume"],
                             vwap=None,  # to be calculated
                             ema9=None,
-                            relatR=None
+                            relatR=None,
+                            avg_volume=None,
+                            rvol=None
                         )
     # calculations
-    last_candle = await handle_incoming_candle(last_candle, atr_value, database_config)
+    last_candle = await handle_incoming_candle(last_candle, atr_value, database_config,database_avgvolume_config)
     
+
+
+
     db_ready_candle = enforce_candle_row_types(last_candle)  # Ensure all floats
-    logging.debug(last_candle)
+    logging.debug(db_ready_candle)
 
     await insert_candlestick_row(db_ready_candle,database_config)
-    # run strategy (still in the hot path — you can offload later too)
+    # # run strategy (still in the hot path — you can offload later too)
     await run_strategies(last_candle,project_config, database_config)
 
 
@@ -78,6 +89,7 @@ async def process_bar(bar_buffer: BarBuffer,
                       store: CandleStore,
                       project_config: dict,
                       database_config: dict,
+                      database_avgvolume_config: dict,
                       atr_value: float,
                       symbol: str,
                       bar: 'RealTimeBar'):
@@ -110,7 +122,7 @@ async def process_bar(bar_buffer: BarBuffer,
             # First, apply the last bar to the previous candle
             store.update_candle(symbol, bar.close, bar.volume)
             # Then finalize
-            await finalize_candle(last_candle, project_config, database_config, atr_value, symbol, bar.close)
+            await finalize_candle(last_candle, project_config, database_config, database_avgvolume_config, atr_value, symbol, bar.close)
 
         # Start a new candle for the current interval
         store.append_candle(symbol, {

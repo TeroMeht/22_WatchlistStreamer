@@ -2,7 +2,8 @@ import pandas as pd
 import logging
 from src.helpers.handle_candles import *
 from src.database.db_functions import *
-
+from typing import List
+import numpy as np
 
 logger = logging.getLogger(__name__)  # module-specific logger
 
@@ -48,10 +49,9 @@ def calculate_14day_atr_df(data, period=14):
 
     return df
 
-def calculate_relatr(intraday_df: pd.DataFrame, 
-                     last_atr_per_symbol: dict) -> pd.DataFrame:
+def calculate_relatr(intraday_df: pd.DataFrame, last_atr_per_symbol: dict) -> pd.DataFrame:
     """
-    Calculate Relatr for a single intraday DataFrame using a dictionary of last ATR per symbol.
+    Calculate Relatr for a single intraday DataFrame using a  dictionary of last ATR per symbol.
 
     Relatr = (VWAP - Close) / ATR
     """
@@ -60,6 +60,50 @@ def calculate_relatr(intraday_df: pd.DataFrame,
     intraday_df['Relatr'] = intraday_df['Symbol'].map(last_atr_per_symbol).fillna(1)
     intraday_df['Relatr'] = ((intraday_df['VWAP'] - intraday_df['Close']) / intraday_df['Relatr']).round(2)
     return intraday_df
+
+def calculate_avg_volume_model(day5_history_datas: pd.DataFrame)-> pd.DataFrame:
+    """
+    Combine 5 days of intraday data and calculate the average volume
+    for each Symbol-Time combination.
+
+    Parameters
+    ----------
+    day5_history_datas : list[pd.DataFrame]
+        List of 5 daily DataFrames with columns:
+        ['Symbol', 'Date', 'Time', 'Open', 'High', 'Low', 'Close', 'Volume']
+
+    Returns
+    -------
+    pd.DataFrame
+        A single DataFrame (average day model) with columns:
+        ['Symbol', 'Time', 'Avg_volume']
+    """
+    # Combine all 5 days
+    all_data = pd.concat(day5_history_datas, ignore_index=True)
+
+    # Group by Symbol and Time, compute mean volume
+    avg_volume_df = (
+        all_data.groupby(['Symbol', 'Time'], as_index=False)['Volume']
+        .mean()
+        .rename(columns={'Volume': 'Avg_volume'})
+    )
+
+    return avg_volume_df
+
+def calculate_rvol(merged_df: pd.DataFrame) -> pd.DataFrame:
+
+    if 'Volume' not in merged_df.columns or 'Avg_volume' not in merged_df.columns:
+        logger.error("Missing columns for Rvol calculation.")
+        merged_df['Rvol'] = 0.0
+        return merged_df
+
+    merged_df['Rvol'] = np.where(
+        (merged_df['Avg_volume'].isna()) | (merged_df['Avg_volume'] == 0),
+        0.0,
+        (merged_df['Volume'] / merged_df['Avg_volume']).round(2)
+    )
+
+    return merged_df
 
 
 def calculate_next_vwap(candle: CandleRow, historical_df: pd.DataFrame) -> CandleRow:
@@ -107,6 +151,22 @@ def calculate_next_relatr(candle: CandleRow, atr_value: float) -> CandleRow:
         candle.relatR = 0.0
 
     return candle
+
+
+def calculate_next_rvol(candle: CandleRow, avg_volume: float) -> CandleRow:
+    try:
+        if avg_volume == 0:
+            candle.rvol = 0.0
+        else:
+            candle.rvol = round(candle.volume / avg_volume, 2)
+
+    except Exception as e:
+        logging.exception("Error calculating Rvol for %s: %s", candle.symbol, e)
+        candle.rvol = 0.0
+
+    return candle
+
+
 
 
 

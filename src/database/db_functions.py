@@ -27,8 +27,8 @@ def delete_all_tables_db(database_config):
     try:
         # Check database name first
         db_name = database_config.get("database")
-        if db_name != "livestreaming":
-            logging.info(f"Aborting: database is '{db_name}', not 'livestreaming'.")
+        if db_name != "livestreaming" and db_name != "volumemodels":
+            logging.info(f"Aborting: database is '{db_name}', not 'livestreaming' or 'volumemodels'.")
             return
 
         conn, cur = get_connection_and_cursor(database_config)
@@ -50,7 +50,7 @@ def delete_all_tables_db(database_config):
         # Drop each table except 'alarms'
         for table in tables:
             table_name = table[0]
-            if table_name == "alarms" or "livedata":
+            if table_name == "alarms" or table_name== "livedata":
                 logging.info(f"Skipping table: {table_name}")
                 continue
             cur.execute(f'DROP TABLE IF EXISTS "{table_name}" CASCADE;')
@@ -91,6 +91,8 @@ def create_and_fill_table(df, database_config):
                 row["Volume"],
                 row["VWAP"],
                 row["EMA9"],
+                row["Avg_volume"],
+                row["Rvol"],
                 row["Relatr"]
             )
             for _, row in df.iterrows()
@@ -109,14 +111,17 @@ def create_and_fill_table(df, database_config):
                 "Volume" NUMERIC(18, 2),
                 "VWAP" NUMERIC(10, 2),
                 "EMA9" NUMERIC(10, 2),
+                "Avg_volume" NUMERIC(18, 2),
+                "Rvol" NUMERIC(10, 2),
                 "Relatr" NUMERIC(10, 2)
+
             );
         """
 
         insert_sql = f"""
         INSERT INTO {table_name} 
-        ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr")
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+        ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr")
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
         """
 
         conn, cur = get_connection_and_cursor(database_config)
@@ -140,7 +145,66 @@ def create_and_fill_table(df, database_config):
         if conn:
             conn.close()
 
+def create_and_fill_avg_volume_tables(df_list, database_config):
+    """
+    Create and fill average volume tables for multiple symbols.
 
+    Parameters
+    ----------
+    df_list : list[pd.DataFrame]
+        Each DataFrame must contain ['Symbol', 'Time', 'Avg_volume'].
+    database_config : dict
+        Database connection info for get_connection_and_cursor().
+    """
+    conn, cur = None, None
+    try:
+        conn, cur = get_connection_and_cursor(database_config)
+
+        for df in df_list:
+            if df.empty:
+                continue
+
+            # Table name = lowercase symbol name
+            table_name = df["Symbol"].iloc[0].lower()
+            logging.info(f"Filling average volume table: {table_name}")
+
+            # Prepare data
+            data = [
+                (row["Symbol"], row["Time"], row["Avg_volume"])
+                for _, row in df.iterrows()
+            ]
+
+            # Create table if not exists
+            create_table_sql = f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    "Symbol" TEXT NOT NULL,
+                    "Time" TIME NOT NULL,
+                    "Avg_volume" NUMERIC(18, 2)
+                );
+            """
+
+            # Insert statement
+            insert_sql = f"""
+                INSERT INTO {table_name} ("Symbol", "Time", "Avg_volume")
+                VALUES (%s, %s, %s);
+            """
+
+            # Execute SQL
+            cur.execute(create_table_sql)
+            cur.executemany(insert_sql, data)
+            conn.commit()
+
+            logging.info(f" Inserted {len(data)} rows into '{table_name}'")
+
+    except Exception as e:
+        logging.error(f" Error inserting avg volumes: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 async def get_async_connection(database_config):
     """
@@ -191,6 +255,8 @@ async def insert_candlestick_row(last_candle: CandleRow, database_config: dict):
             last_candle.volume,
             last_candle.vwap,
             last_candle.ema9,
+            last_candle.avg_volume,
+            last_candle.rvol,
             last_candle.relatR,
         )
 
@@ -208,8 +274,8 @@ async def insert_candlestick_row(last_candle: CandleRow, database_config: dict):
         # --- Insert new record ---
         insert_sql = f"""
         INSERT INTO "{symbol}" 
-        ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr")
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11);
+        ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9","Avg_volume", "Rvol","Relatr")
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13);
         """
         await conn.execute(insert_sql, *db_row)
         logging.info(f"Inserted candle into '{symbol}': {last_candle}")
@@ -275,6 +341,52 @@ async def insert_bulk_livestream(bars: list[dict], database_config: dict):
         logging.exception("Error inserting bars into livedata table: %s", e)
 
     
+
+
+
+async def fetch_avg_volume_for_candle(candle_row: CandleRow, database_avgvolume_config) -> float:
+    """
+    Fetch the average volume for a given candle's symbol and time from the avg volume table.
+
+    Parameters
+    ----------
+    candle_row : CandleRow
+        Dataclass instance containing at least .symbol and .time.
+    database_avgvolume_config : dict
+        Database configuration to connect to the average volume DB.
+
+    Returns
+    -------
+    float
+        The Avg_volume value for that candle, or 0.0 if not found.
+    """
+    conn = None
+    try:
+        symbol = candle_row.symbol
+        time_val = candle_row.time
+        table_name = symbol.lower()
+
+        conn = await get_async_connection(database_avgvolume_config)
+
+        query = f"""
+            SELECT "Avg_volume"
+            FROM "{table_name}"
+            WHERE "Time" = $1
+            LIMIT 1;
+        """
+        row = await conn.fetchrow(query, time_val)
+
+        # Return 0.0 if row or column is missing, else convert to float
+        return float(row["Avg_volume"]) if row and row.get("Avg_volume") is not None else 0.0
+
+    except Exception as e:
+        logging.error(f"Error fetching avg volume for {symbol} at {time_val}: {e}")
+        return 0.0
+
+    finally:
+        if conn:
+            await conn.close()
+
 
 #-----------------Alarms handling----------------------------------------------------------------
 

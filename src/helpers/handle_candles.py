@@ -56,7 +56,10 @@ class CandleRow:
     volume: float
     vwap: float
     ema9: float
+    avg_volume: float
+    rvol: float
     relatR: float
+
 
 def enforce_candle_row_types(candle: CandleRow) -> CandleRow:
     """Ensure all fields match the dataclass types (float for numerics)."""
@@ -71,7 +74,10 @@ def enforce_candle_row_types(candle: CandleRow) -> CandleRow:
         volume=float(candle.volume),
         vwap=float(candle.vwap),
         ema9=float(candle.ema9),
+        avg_volume=float(candle.avg_volume),
+        rvol=float(candle.rvol),
         relatR=float(candle.relatR)
+
     )
 
 
