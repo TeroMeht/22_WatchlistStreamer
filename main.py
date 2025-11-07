@@ -19,13 +19,15 @@ async def main()-> None:
     """
     # Load configuration files
     database_config = read_database_config(filename="database.ini", section="livestream")
+    database_avgvolume_config = read_database_config(filename="database.ini", section="avgvolume")
+
     project_config = read_project_config(config_file="config.json")
 
     # Load symbols
     symbols = load_symbols_from_folder(project_config["tickers_folder"])
 
     # Call the streamer function
-    await run_streamer(symbols, project_config, database_config)
+    await run_streamer(symbols, project_config, database_config, database_avgvolume_config)
 
 
 # --- Script execution ---

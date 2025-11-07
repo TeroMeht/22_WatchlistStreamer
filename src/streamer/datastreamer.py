@@ -16,7 +16,7 @@ from src.helpers.handle_dataframes import *
 from src.helpers.process_incoming_data import CandleStore
 from src.helpers.handle_barbuffer import BarBuffer
 
-async def run_streamer(symbols, project_config, database_config):
+async def run_streamer(symbols, project_config, database_config, database_avgvolume_config):
     """
     Handles all logic for data fetching, ATR calculations, and live monitoring.
     """
@@ -26,12 +26,12 @@ async def run_streamer(symbols, project_config, database_config):
     
     logging.info("Cleaning up tables in the database...")
     delete_all_tables_db(database_config)
+    delete_all_tables_db(database_avgvolume_config)
 
     ib = IB()
     await ib.connectAsync(project_config["host"],
                           project_config["port"],
-                          project_config["clientId"]
-    )
+                          project_config["clientId"])
 
     tickers = [s[0] if isinstance(s, tuple) else s for s in symbols]
     time_zone = project_config["timezone"]
@@ -46,9 +46,20 @@ async def run_streamer(symbols, project_config, database_config):
         fetch_history_daily(ib, ticker) for ticker in tickers
     ])
 
-    relatr_datasets, last_atr_dict = handle_Atr_intraday_dataset(
-       intraday_results, daily_results_with_atr
-    )
+
+    logging.info(f"Fetching 5-day intraday historical data for {len(tickers)} tickers...")
+    avg_volume_results_5d = await asyncio.gather(*[
+        fetch_intraday_volume_history(ib, ticker, time_zone) for ticker in tickers
+    ])
+
+    create_and_fill_avg_volume_tables(avg_volume_results_5d, database_avgvolume_config)
+
+    rvol_dataset = handle_intraday_rvol_dataset(intraday_results,avg_volume_results_5d)
+    
+
+
+    relatr_datasets, last_atr_dict = handle_Atr_intraday_dataset(rvol_dataset, daily_results_with_atr)
+    logging.info(relatr_datasets)
     logging.info("Relatr calculation completed for all tickers.")
 
     for ticker, df in relatr_datasets.items():
@@ -61,6 +72,7 @@ async def run_streamer(symbols, project_config, database_config):
             candle_store,
             project_config,
             database_config,
+            database_avgvolume_config,
             last_atr_dict.get(ticker),
             ib,
             ticker

@@ -45,7 +45,7 @@ async def get_last_ask_price(ib: IB, symbol: str, exchange: str = "SMART", curre
 
 # Fetch history for ATR calculation
 async def fetch_history_daily(ib: IB, symbol: str):
-    """Fetch last 14 days of daily historical data up to yesterday (needed for ATR)."""
+    logging.info(f"Requesting 14 daily historical data for {symbol}")
     contract = Stock(symbol, "SMART", "USD")
 
     # IB format: 'YYYYMMDD HH:MM:SS'
@@ -68,10 +68,8 @@ async def fetch_history_daily(ib: IB, symbol: str):
     return atr_df
 
 # --- Historical fetch ---
-async def fetch_intraday_history(ib: IB, 
-                                 symbol: str,
-                                 time_zone :str):
-    logging.info(f"Requesting data for {symbol}")
+async def fetch_intraday_history(ib: IB, symbol: str, time_zone: str):
+    logging.info(f"Requesting intraday data for {symbol}")
 
     contract = Stock(symbol, "SMART", "USD")
     bars = await ib.reqHistoricalDataAsync(
@@ -92,7 +90,29 @@ async def fetch_intraday_history(ib: IB,
 
     return processed_df
         
+# --- Historical fetch for Rvol calculation ---
+async def fetch_intraday_volume_history(ib: IB, symbol: str, time_zone: str):
+    logging.info(f"Requesting Rvol data for {symbol}")
 
+    contract = Stock(symbol, "SMART", "USD")
+
+    bars = await ib.reqHistoricalDataAsync(
+        contract,
+        endDateTime="",
+        durationStr="5 D",
+        barSizeSetting="2 mins",
+        whatToShow="TRADES",
+        useRTH=False
+    )
+
+    if not bars:
+        logging.warning(f"No 5-day historical data returned for {symbol}")
+        return None
+    
+    # Process bars directly using the intraday handler
+    processed_df = handle_incoming_dataframe_intradays_volume(bars, symbol,time_zone)
+
+    return processed_df
 
 
 # --- Real-time monitoring loop ---
@@ -100,6 +120,7 @@ async def monitor_tickers(  bar_buffer,
                             candle_store,
                             project_config,
                             database_config,
+                            database_avgvolume_config,
                             atr,
                             ib: IB, 
                             symbol: str):
@@ -120,7 +141,8 @@ async def monitor_tickers(  bar_buffer,
                 await process_bar(bar_buffer,
                                 candle_store,
                                 project_config,
-                                database_config, 
+                                database_config,
+                                database_avgvolume_config,
                                 atr,
                                 symbol, 
                                 bar) 

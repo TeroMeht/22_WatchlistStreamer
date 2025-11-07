@@ -1,7 +1,7 @@
 {
     "host": "127.0.0.1",
-    "port2": 7497,
-    "port": 4002,
+    "port": 7497,
+    "port2": 4002,
     "clientId": 0,
     "risk": 100,
     "capitulation_threshold": 0.5,
@@ -10,5 +10,6 @@
     "CHAT_ID": "7892660893",
     "tickers_folder" : "./tickers",
     "timezone" : "Europe/Helsinki",
-    "barbuffer_size" : 100
+    "barbuffer_size" : 4000,
+    "alarm_cutoff_minutes": 25
 }
