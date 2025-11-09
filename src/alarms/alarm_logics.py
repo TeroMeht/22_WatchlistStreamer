@@ -93,46 +93,31 @@ def is_vwap_close(df, vwap_distance, price_col="Relatr"):
 
     return -vwap_distance <= relatr <= vwap_distance
 
-async def detect_vwap_setup(df, table_name,database_config, project_config):
+async def detect_vwap_setup(candle: CandleRow, database_config, project_config):
     """
     Trigger a VWAP continuation setup alarm using the last row of the provided DataFrame.
     No checks; assumes df has relevant data.
     """
-    try:
-        if df is None or df.empty:
-            logging.info(f"{table_name}: No historical data provided.")
-            return False
+    # Log contextual info
+    logging.info(
+        "Generating VWAP continuation alarm for candle:\n" +
+        json.dumps({
+            "Symbol": candle.symbol,
+            "Date": str(candle.date),
+            "Time": str(candle.time),
+            "Close": candle.close,
+            "Relatr": candle.relatR,
+            "Rvol": candle.rvol,
+            "VWAP": candle.vwap,
+        }, indent=4)
+    )
 
-        # Use the last row in the DataFrame
-        last_row = df.iloc[-1]
-
-        selected = {
-            "Symbol": last_row["Symbol"],
-            "Time": last_row["Time"],
-            "Date": last_row["Date"],
-            "Relatr": last_row.get("Relatr", None),
-        }
-
-        logging.info("Generating VWAP continuation alarm for:\n" +
-                     json.dumps(selected, indent=4, default=str))
-
-        # Trigger the alarm
-        await generate_signal_alarm(
-            symbol=last_row["Symbol"],
-            time_obj=last_row["Time"],
-            date_obj=last_row["Date"],
-            signal_name="VWAP continuation setup",
-            close_price=last_row["Close"],
-            database_config=database_config,
-            project_config=project_config
-        )
-
-        return True
-
-    except Exception as e:
-        logging.error(f"Error generating VWAP setup alarm for {table_name}: {e}")
-        return False
-
+    # Trigger the alarm
+    await generate_signal_alarm(candle=candle,
+                                signal_name="VWAP continuation setup",
+                                database_config=database_config,
+                                project_config=project_config
+                            )
 
 
 
@@ -153,7 +138,7 @@ def is_crossover_up(df, price_col="Close", ema_col="EMA9"):
 
     return crossed_from_below and closed_above_ema
 
-async def detect_ema_crossover_up(df, table_name, database_config, project_config):
+async def detect_ema_crossover_up(df, candle: CandleRow, database_config, project_config):
     """
     Detect upward EMA crossover and trigger alarm if detected.
     """
@@ -162,20 +147,20 @@ async def detect_ema_crossover_up(df, table_name, database_config, project_confi
             last_row = df.iloc[-1]
             logging.info(f"{last_row['Symbol']}: EMA9 crossover up detected, generating alarm...")
 
-            await generate_signal_alarm(
-                symbol=last_row["Symbol"],
-                time_obj=last_row["Time"],
-                date_obj=last_row["Date"],
-                signal_name="EMA9 crossover up",
-                close_price=last_row["Close"],
-                database_config=database_config,
-                project_config=project_config
-            )
+            await generate_signal_alarm(candle=candle,
+                                        signal_name="EMA9 crossover up",
+                                        database_config=database_config,
+                                        project_config=project_config
+                                    )
+
+
+
+
         else:
-            logging.info(f"{table_name}: No EMA9 crossover up detected.\n")
+            logging.info(f"{candle.symbol}: No EMA9 crossover up detected.\n")
 
     except Exception as e:
-        logging.error(f"Error in detect_ema_crossover_up_from_df for {table_name}: {e}")
+        logging.error(f"Error in detect_ema_crossover_up_from_df for {candle.symbol}: {e}")
 
 
 
@@ -225,29 +210,43 @@ async def detect_ema_crossover_down(df, table_name, database_config, project_con
 
 
 # Generate alarm message and insert
-async def generate_signal_alarm(symbol, time_obj, date_obj, signal_name, close_price,
-    database_config, project_config):
+async def generate_signal_alarm(candle: CandleRow,
+                                signal_name: str,
+                                database_config: dict,
+                                project_config: dict):
     """
     Builds and sends an EMA9 crossover alarm if no recent duplicate exists.
   
       """
     try:
-        if not await alarm_exists_recently(symbol, time_obj, date_obj, database_config, cutoff_minutes=15):
-        
-
+        # Check if a recent alarm already exists
+        if not await alarm_exists_recently(symbol=candle.symbol,
+                                            time_obj=candle.time,
+                                            date_obj=candle.date,
+                                            database_config=database_config,
+                                            cutoff_minutes=project_config["alarm_cutoff_minutes"]):
 
             # Build alarm message
-            alarm_msg = f"{signal_name} detected for {symbol} at {close_price:.2f}"
+            alarm_msg = f"{signal_name} detected"
 
-            # Insert alarm and send Telegram message
-            await insert_alarm(symbol, time_obj, alarm_msg, date_obj, database_config)
-            await send_telegram_message(symbol, time_obj, alarm_msg,
-                                        bot_token=project_config["BOT_TOKEN"],
-                                        chat_id=project_config["CHAT_ID"]
-                                    )
-            
+            # Insert alarm into DB
+            await insert_alarm(
+                symbol=candle.symbol,
+                time_obj=candle.time,
+                alarm_message=alarm_msg,
+                date_obj=candle.date,
+                database_config=database_config
+            )
+            # Send Telegram message
+            # await send_telegram_message(
+            #     symbol=candle.symbol,
+            #     time_obj=candle.time,
+            #     alarm_message=alarm_msg,
+            #     bot_token=project_config["BOT_TOKEN"],
+            #     chat_id=project_config["CHAT_ID"]
+            # )
 
-            intraday_data = await get_last_rows(table_name=symbol.lower(), num_rows=None, database_config=database_config)
+            intraday_data = await get_last_rows(table_name=candle.symbol.lower(), num_rows=None, database_config=database_config)
             # Create and show plot
             fig = plot_intraday_chart(intraday_data)
             # Convert figure to image in-memory (byte object)
@@ -255,8 +254,11 @@ async def generate_signal_alarm(symbol, time_obj, date_obj, signal_name, close_p
             alarm_message = alarm_msg
             await send_telegram_picture(project_config, image_bytes, alarm_message)  # Send directly to Telegram
 
-
-            logging.info(f"{symbol}: Signal alarm '{signal_name}' sent successfully.")
+            logging.info(f"{candle.symbol}: Signal alarm '{signal_name}' sent successfully.")
 
     except Exception as e:
-        logging.error(f"Error generating signal alarm for {symbol}: {e}")
+        logging.error(f"Error generating signal alarm for {candle.symbol}: {e}")
+                                    
+            
+
+
