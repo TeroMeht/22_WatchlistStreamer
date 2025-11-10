@@ -36,37 +36,49 @@ async def run_streamer(symbols, project_config, database_config, database_avgvol
     tickers = [s[0] if isinstance(s, tuple) else s for s in symbols]
     time_zone = project_config["timezone"]
 
-    logging.info(f"Fetching 2-min intraday data for {len(tickers)} tickers...")
-    intraday_results = await asyncio.gather(*[
-        fetch_intraday_history(ib, ticker,time_zone) for ticker in tickers
-    ])
-
-    logging.info(f"Fetching 14-day daily historical data for {len(tickers)} tickers...")
-    daily_results_with_atr = await asyncio.gather(*[
-        fetch_history_daily(ib, ticker) for ticker in tickers
-    ])
+    # IB data fetching functions
+    intraday_results = await asyncio.gather(*[fetch_intraday_history(ib, ticker, time_zone) for ticker in tickers])
+    daily_results_with_atr = await asyncio.gather(*[fetch_history_daily(ib, ticker) for ticker in tickers])
+    avg_volume_results_5d = await asyncio.gather(*[fetch_intraday_volume_history(ib, ticker, time_zone) for ticker in tickers])
 
 
-    logging.info(f"Fetching 5-day intraday historical data for {len(tickers)} tickers...")
-    avg_volume_results_5d = await asyncio.gather(*[
-        fetch_intraday_volume_history(ib, ticker, time_zone) for ticker in tickers
-    ])
+    # --- validate each and combine found tickers ---
+    found_intraday = validate_datasets(intraday_results, tickers, "2-min intraday")
+    found_daily = validate_datasets(daily_results_with_atr, tickers, "14-day daily")
+    found_volume = validate_datasets(avg_volume_results_5d, tickers, "5-day intraday")
+
+    # keep only tickers that were found in all datasets
+    valid_tickers = [t for t in tickers if t in found_intraday and t in found_daily and t in found_volume]
+
+
+        # --- If no valid tickers, stop early ---
+    if not valid_tickers:
+        logging.error(" No valid tickers found in all datasets. Aborting.")
+        ib.disconnect()
+        return
+
+    # --- Filter datasets to only include valid tickers ---
+    intraday_results = [df for df in intraday_results if df is not None and not df.empty and df['Symbol'].iloc[0] in valid_tickers]
+    daily_results_with_atr = [df for df in daily_results_with_atr if df is not None and not df.empty and df['Symbol'].iloc[0] in valid_tickers]
+    avg_volume_results_5d = [df for df in avg_volume_results_5d if df is not None and not df.empty and df['Symbol'].iloc[0] in valid_tickers]
+
 
     create_and_fill_avg_volume_tables(avg_volume_results_5d, database_avgvolume_config)
 
     rvol_dataset = handle_intraday_rvol_dataset(intraday_results,avg_volume_results_5d)
-    
-
-
     relatr_datasets, last_atr_dict = handle_Atr_intraday_dataset(rvol_dataset, daily_results_with_atr)
-    logging.info(relatr_datasets)
-    logging.info("Relatr calculation completed for all tickers.")
+
 
     for ticker, df in relatr_datasets.items():
         create_and_fill_table(df, database_config)
 
-    logging.info("Starting live monitoring...")
+    # --- Determine and log dropped tickers ---
+    dropped_tickers = [t for t in tickers if t not in valid_tickers]
 
+
+    logging.warning(f"⚠️ Dropped tickers: {dropped_tickers}")
+    logging.info("Starting live monitoring...")
+    # --- Start live monitoring tasks ---#    
     live_tasks = [
         monitor_tickers(bar_buffer,
             candle_store,

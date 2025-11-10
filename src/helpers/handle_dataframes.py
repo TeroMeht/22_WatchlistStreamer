@@ -141,7 +141,7 @@ def handle_incoming_dataframe_daily(bars: List[IncomingBar], symbol:str)-> pd.Da
     # Keep only columns that exist (some may be missing)
     df = df[[col for col in desired_order if col in df.columns]]
 
-    logger.info(df.tail(10))
+
     return df
 
 def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:str, time_zone:str)-> pd.DataFrame:
@@ -252,7 +252,7 @@ def handle_intraday_rvol_dataset(intraday_results: list[pd.DataFrame], avg_volum
         merged_df = calculate_rvol(merged_df)
 
         rvol_datasets[symbol] = merged_df
-        logger.info(f"{symbol} - last 10 rows with Rvol:\n{merged_df.tail(10)}")
+        logger.debug(f"{symbol} - last 10 rows with Rvol:\n{merged_df.tail(10)}")
 
     return rvol_datasets
 

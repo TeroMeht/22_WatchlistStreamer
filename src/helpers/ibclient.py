@@ -46,19 +46,20 @@ async def get_last_ask_price(ib: IB, symbol: str, exchange: str = "SMART", curre
 # Fetch history for ATR calculation
 async def fetch_history_daily(ib: IB, symbol: str):
     logging.info(f"Requesting 14 daily historical data for {symbol}")
+
     contract = Stock(symbol, "SMART", "USD")
+    await ib.qualifyContractsAsync(contract)
 
     # IB format: 'YYYYMMDD HH:MM:SS'
     yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d 23:59:59')
 
-    bars = await ib.reqHistoricalDataAsync(
-        contract,
-        endDateTime=yesterday,      # stop at yesterday
-        durationStr="14 D",         # last 14 calendar days
-        barSizeSetting="1 day",     # daily bars
-        whatToShow="TRADES",
-        useRTH=True                 # only regular trading hours
-    )
+    bars = await ib.reqHistoricalDataAsync( contract,
+                                            endDateTime=yesterday,      # stop at yesterday
+                                            durationStr="14 D",         # last 14 calendar days
+                                            barSizeSetting="1 day",     # daily bars
+                                            whatToShow="TRADES",
+                                            useRTH=True                 # only regular trading hours
+                                        )
 
     if not bars:
         logging.warning(f"No historical data returned for {symbol}")
@@ -72,6 +73,8 @@ async def fetch_intraday_history(ib: IB, symbol: str, time_zone: str):
     logging.info(f"Requesting intraday data for {symbol}")
 
     contract = Stock(symbol, "SMART", "USD")
+    await ib.qualifyContractsAsync(contract)
+
     bars = await ib.reqHistoricalDataAsync(
         contract,
         endDateTime="",
@@ -95,6 +98,7 @@ async def fetch_intraday_volume_history(ib: IB, symbol: str, time_zone: str):
     logging.info(f"Requesting Rvol data for {symbol}")
 
     contract = Stock(symbol, "SMART", "USD")
+    await ib.qualifyContractsAsync(contract)
 
     bars = await ib.reqHistoricalDataAsync(
         contract,
