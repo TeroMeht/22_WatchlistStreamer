@@ -12,11 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 async def reversal_strategy(candle: CandleRow, project_config:dict,database_config:dict):
-    """
-    Reversal long strategy:
-    - detect capitulation
-    - trigger EMA9 crossover up
-    """
+
     symbol = candle.symbol.lower()
     logger.info("Running Reversal Long strategy for symbol: %s", candle.symbol)
 
@@ -39,17 +35,11 @@ async def reversal_strategy(candle: CandleRow, project_config:dict,database_conf
 
 
 async def vwapcontinuation_strategy(candle: CandleRow, project_config:dict,database_config:dict):
-    """
-    VWAP Continuation strategy:
-    - first check VWAP closeness
-    - then detect past euforia
-    - if euforia detected, trigger VWAP setup alarm
-    """
-    symbol = candle.symbol.lower()
+
     logger.info("Running VWAP Continuation strategy for symbol: %s", candle.symbol)
 
     # Check VWAP closeness first (latest row)
-    df_all = await get_last_rows(table_name=symbol, num_rows=None, database_config=database_config)
+    df_all = await get_last_rows(table_name=candle.symbol.lower(), num_rows=None, database_config=database_config)
     # Take the last row
     df_latest = df_all.tail(1)
 
@@ -60,11 +50,11 @@ async def vwapcontinuation_strategy(candle: CandleRow, project_config:dict,datab
     logger.debug(f"{candle.symbol}: Price is close to VWAP, checking for past euforia...")
 
     # Tarvii tarkastaa että onhan hinta ollut viimeaikoina VWAP yläpuolella
-    last_10 = df_all.tail(10)
+    last_5 = df_all.tail(5)
 
-    avg_relatr = last_10["Relatr"].mean()
-    if avg_relatr >= 0:
-        logger.info(f"{symbol} - Average Relatr is non-negative ({avg_relatr:.3f}), skipping euforia check. Price has not been above VWAP recently.")
+    avg_relatr = last_5["Relatr"].mean()
+    if avg_relatr > 0:
+        logger.info(f"{candle.symbol} - Average Relatr is non-negative ({avg_relatr:.3f}), skipping euforia check. Price has not been above VWAP recently.")
         return
 
 
@@ -75,11 +65,14 @@ async def vwapcontinuation_strategy(candle: CandleRow, project_config:dict,datab
         # Alarm generation
         await detect_vwap_setup(candle=candle,
                                 database_config=database_config,
-                                project_config=project_config,
-
-        )
+                                project_config=project_config)
     else:
         logger.debug(f"No euforia detected for symbol: {candle.symbol} near VWAP.")
+
+
+
+
+
 
 
 # async def reversal_short_strategy(candle: CandleRow, project_config:dict,database_config:dict):
@@ -142,5 +135,3 @@ async def run_strategies(candle : CandleRow,
         # reversal_short_strategy(last_candle, database_config, project_config),
         # exit_strategy(last_candle, database_config, project_config),
     )
-   # await reversal_short_strategy(last_candle, database_config, project_config)
-    # exit_strategy(last_candle, database_config, project_config)

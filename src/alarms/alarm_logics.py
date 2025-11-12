@@ -20,26 +20,22 @@ async def detect_stoplevel(table_name, num_rows, database_config):
 def detect_capitulation(df, threshold):
 
     try:
-        if df is None or df.empty:
-            return False
-
         # Vectorized check: select all rows exceeding the threshold
         capitulated_rows = df[df["Relatr"] >= threshold]
 
-        if not capitulated_rows.empty:
-            # Take the last row that triggered capitulation
-            last_row = capitulated_rows.iloc[-1]
+        # Take the last row that triggered capitulation
+        last_row = capitulated_rows.iloc[-1]
 
-            selected = {
-                "Symbol": last_row["Symbol"],
-                "Time": last_row["Time"],
-                "Relatr": last_row["Relatr"],
-            }
+        selected = {
+            "Symbol": last_row["Symbol"],
+            "Time": last_row["Time"],
+            "Relatr": last_row["Relatr"],
+        }
 
-            logging.info(
-                "Capitulation detected:\n" + json.dumps(selected, indent=4, default=str)
-            )
-            return True
+        logging.info(
+            "Capitulation detected:\n" + json.dumps(selected, indent=4, default=str)
+        )
+        return True
 
     except Exception as e:
         logging.error(f"Error in detect_capitulation: {e}")
@@ -52,26 +48,22 @@ def detect_euforia(df, threshold):
     Triggered when 'Relatr' is below -threshold (strong upward move).
     """
     try:
-        if df is None or df.empty:
-            return False
-
         # Vectorized check: select all rows below negative threshold
         euforia_rows = df[df["Relatr"] <= -threshold]
 
-        if not euforia_rows.empty:
-            # Take the last row that triggered euphoria
-            last_row = euforia_rows.iloc[-1]
+        # Take the last row that triggered euphoria
+        last_row = euforia_rows.iloc[-1]
 
-            selected = {
-                "Symbol": last_row["Symbol"],
-                "Time": last_row["Time"],
-                "Relatr": last_row["Relatr"],
-            }
+        selected = {
+            "Symbol": last_row["Symbol"],
+            "Time": last_row["Time"],
+            "Relatr": last_row["Relatr"],
+        }
 
-            logging.info(
-                "Euforia detected:\n" + json.dumps(selected, indent=4, default=str)
-            )
-            return True
+        logging.info(
+            "Euforia detected:\n" + json.dumps(selected, indent=4, default=str)
+        )
+        return True
 
     except Exception as e:
         logging.error(f"Error in detect_euforia: {e}")
@@ -85,8 +77,6 @@ def is_vwap_close(df, vwap_distance, price_col="Relatr"):
     """
     Check if the last row's Relatr is within ±vwap_distance.
     """
-    if df is None or df.empty:
-        return False
 
     last_row = df.iloc[-1]
     relatr = last_row[price_col]
@@ -150,10 +140,7 @@ async def detect_ema_crossover_up(df, candle: CandleRow, database_config, projec
             await generate_signal_alarm(candle=candle,
                                         signal_name="EMA9 crossover up",
                                         database_config=database_config,
-                                        project_config=project_config
-                                    )
-
-
+                                        project_config=project_config)
 
 
         else:
@@ -209,20 +196,21 @@ async def detect_ema_crossover_down(df, table_name, database_config, project_con
 
 
 
+
+
+
 # Generate alarm message and insert
 async def generate_signal_alarm(candle: CandleRow,
                                 signal_name: str,
                                 database_config: dict,
-                                project_config: dict):
+                                project_config: dict)-> None:
     """
     Builds and sends an EMA9 crossover alarm if no recent duplicate exists.
   
       """
     try:
         # Check if a recent alarm already exists
-        if not await alarm_exists_recently(symbol=candle.symbol,
-                                            time_obj=candle.time,
-                                            date_obj=candle.date,
+        if not await alarm_exists_recently(candle=candle,
                                             database_config=database_config,
                                             cutoff_minutes=project_config["alarm_cutoff_minutes"]):
 
@@ -230,28 +218,18 @@ async def generate_signal_alarm(candle: CandleRow,
             alarm_msg = f"{signal_name} detected"
 
             # Insert alarm into DB
-            await insert_alarm(
-                symbol=candle.symbol,
-                time_obj=candle.time,
-                alarm_message=alarm_msg,
-                date_obj=candle.date,
-                database_config=database_config
-            )
-            # Send Telegram message
-            # await send_telegram_message(
-            #     symbol=candle.symbol,
-            #     time_obj=candle.time,
-            #     alarm_message=alarm_msg,
-            #     bot_token=project_config["BOT_TOKEN"],
-            #     chat_id=project_config["CHAT_ID"]
-            # )
+            await insert_alarm(candle=candle,
+                                alarm_message=alarm_msg,
+                                database_config=database_config)
 
             intraday_data = await get_last_rows(table_name=candle.symbol.lower(), num_rows=None, database_config=database_config)
             # Create and show plot
+
             fig = plot_intraday_chart(intraday_data)
             # Convert figure to image in-memory (byte object)
             image_bytes = pio.to_image(fig, format='png')  # Convert to PNG in memory
-            alarm_message = alarm_msg
+
+            alarm_message = f"{candle.symbol}: {signal_name} detected, Rvol: {candle.rvol}:"
             await send_telegram_picture(project_config, image_bytes, alarm_message)  # Send directly to Telegram
 
             logging.info(f"{candle.symbol}: Signal alarm '{signal_name}' sent successfully.")
