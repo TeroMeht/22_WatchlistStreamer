@@ -76,7 +76,7 @@ async def run_streamer(symbols, project_config, database_config, database_avgvol
     dropped_tickers = [t for t in tickers if t not in valid_tickers]
 
 
-    logging.warning(f"⚠️ Dropped tickers: {dropped_tickers}")
+    logging.warning(f"Dropped tickers: {dropped_tickers}")
     logging.info("Starting live monitoring...")
     # --- Start live monitoring tasks ---#    
     live_tasks = [

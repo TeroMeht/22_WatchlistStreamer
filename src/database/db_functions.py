@@ -206,7 +206,7 @@ def create_and_fill_avg_volume_tables(df_list, database_config):
         if conn:
             conn.close()
 
-async def get_async_connection(database_config):
+async def get_async_connection(database_config:dict)-> asyncpg.Connection:
     """
     Create and return an async database connection.
 
@@ -340,9 +340,6 @@ async def insert_bulk_livestream(bars: list[dict], database_config: dict):
     except Exception as e:
         logging.exception("Error inserting bars into livedata table: %s", e)
 
-    
-
-
 
 async def fetch_avg_volume_for_candle(candle_row: CandleRow, database_avgvolume_config) -> float:
     """
@@ -391,7 +388,7 @@ async def fetch_avg_volume_for_candle(candle_row: CandleRow, database_avgvolume_
 #-----------------Alarms handling----------------------------------------------------------------
 
 
-async def get_last_rows(table_name, num_rows=None, database_config=None):
+async def get_last_rows(table_name:str, num_rows=None, database_config=None):
     """
     Fetch the last `num_rows` from the given table asynchronously.
     If num_rows is None, fetch all available rows.
@@ -442,7 +439,7 @@ async def get_last_rows(table_name, num_rows=None, database_config=None):
             await conn.close()
 
 
-async def insert_alarm(symbol, time_obj, alarm_message, date_obj, database_config):
+async def insert_alarm(candle: CandleRow, alarm_message, database_config):
     """Async insert of an alarm into the database."""
     conn = None
     try:
@@ -452,8 +449,13 @@ async def insert_alarm(symbol, time_obj, alarm_message, date_obj, database_confi
             INSERT INTO alarms ("Symbol", "Time", "Alarm", "Date")
             VALUES ($1, $2, $3, $4);
         """
-        await conn.execute(insert_query, symbol, time_obj, alarm_message, date_obj)
-        logging.info("Alarm inserted: %s %s %s", symbol, time_obj, alarm_message)
+        await conn.execute(insert_query,
+                            candle.symbol,
+                            candle.time,
+                            alarm_message,  # <- third argument: Alarm (string)
+                            candle.date     # <- fourth argument: Date (date)
+                        )
+        logging.info("Alarm inserted: %s %s %s", candle.symbol, candle.time, alarm_message)
 
     except Exception as e:
         logging.error("Error inserting alarm: %s", e)
@@ -462,7 +464,7 @@ async def insert_alarm(symbol, time_obj, alarm_message, date_obj, database_confi
             await conn.close()
 
 
-async def alarm_exists_recently(symbol, time_obj, date_obj, database_config, cutoff_minutes=15):
+async def alarm_exists_recently(candle:CandleRow, database_config, cutoff_minutes)-> bool:
     """
     Async check if an alarm exists for the symbol within the last `cutoff_minutes`.
     Returns True if exists, False otherwise.
@@ -471,7 +473,7 @@ async def alarm_exists_recently(symbol, time_obj, date_obj, database_config, cut
     try:
         conn = await get_async_connection(database_config)
 
-        current_dt = datetime.combine(date_obj, time_obj)
+        current_dt = datetime.combine(candle.date, candle.time)
         cutoff_dt = current_dt - timedelta(minutes=cutoff_minutes)
 
         query = """
@@ -482,7 +484,7 @@ async def alarm_exists_recently(symbol, time_obj, date_obj, database_config, cut
                    OR ("Date" = $3 AND "Time" >= $4))
             LIMIT 1;
         """
-        row = await conn.fetchrow(query, symbol, cutoff_dt.date(), cutoff_dt.date(), cutoff_dt.time())
+        row = await conn.fetchrow(query, candle.symbol, cutoff_dt.date(), cutoff_dt.date(), cutoff_dt.time())
         return row is not None
 
     except Exception as e:
