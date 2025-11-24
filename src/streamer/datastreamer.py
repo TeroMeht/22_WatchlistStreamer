@@ -63,14 +63,15 @@ async def run_streamer(symbols, project_config, database_config, database_avgvol
     avg_volume_results_5d = [df for df in avg_volume_results_5d if df is not None and not df.empty and df['Symbol'].iloc[0] in valid_tickers]
 
 
-    create_and_fill_avg_volume_tables(avg_volume_results_5d, database_avgvolume_config)
-
+    
     rvol_dataset = handle_intraday_rvol_dataset(intraday_results,avg_volume_results_5d)
     relatr_datasets, last_atr_dict = handle_Atr_intraday_dataset(rvol_dataset, daily_results_with_atr)
 
+    await create_and_fill_avg_volume_tables_async(avg_volume_results_5d, database_avgvolume_config)
 
-    for ticker, df in relatr_datasets.items():
-        create_and_fill_table(df, database_config)
+    await asyncio.gather(
+    *(create_and_fill_table_async(df, database_config) for df in relatr_datasets.values())
+)
 
     # --- Determine and log dropped tickers ---
     dropped_tickers = [t for t in tickers if t not in valid_tickers]
@@ -89,7 +90,7 @@ async def run_streamer(symbols, project_config, database_config, database_avgvol
             ib,
             ticker
         )
-        for ticker in tickers
+        for ticker in valid_tickers
     ]
 
     await asyncio.gather(*live_tasks)
