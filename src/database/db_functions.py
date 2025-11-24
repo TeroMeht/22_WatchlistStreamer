@@ -71,6 +71,140 @@ def delete_all_tables_db(database_config):
         if conn:
             conn.close()
 
+
+async def create_and_fill_table_async(df: pd.DataFrame, database_config: dict):
+    """
+    Asynchronously creates a table for the given DataFrame's symbol and inserts all rows.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing historical data with columns:
+        Symbol, Date, Time, Open, High, Low, Close, Volume, VWAP, EMA9, Avg_volume, Rvol, Relatr
+    database_config : dict
+        Database connection parameters.
+    """
+    table_name = df["Symbol"].iloc[0]
+
+
+    # Convert DataFrame to list of tuples
+    data = [
+        (
+            row["Symbol"],
+            row["Date"],
+            row["Time"],
+            row["Open"],
+            row["High"],
+            row["Low"],
+            row["Close"],
+            row["Volume"],
+            row["VWAP"],
+            row["EMA9"],
+            row["Avg_volume"],
+            row["Rvol"],
+            row["Relatr"]
+        )
+        for _, row in df.iterrows()
+    ]
+
+    create_table_sql = f"""
+    CREATE TABLE IF NOT EXISTS {table_name} (
+        "Symbol" TEXT NOT NULL,
+        "Date" DATE NOT NULL,
+        "Time" TIME NOT NULL,
+        "Open" NUMERIC(10, 2),
+        "High" NUMERIC(10, 2),
+        "Low" NUMERIC(10, 2),
+        "Close" NUMERIC(10, 2),
+        "Volume" NUMERIC(18, 2),
+        "VWAP" NUMERIC(10, 2),
+        "EMA9" NUMERIC(10, 2),
+        "Avg_volume" NUMERIC(18, 2),
+        "Rvol" NUMERIC(10, 2),
+        "Relatr" NUMERIC(10, 2)
+    );
+    """
+
+    insert_sql = f"""
+    INSERT INTO {table_name} 
+    ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr")
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
+    """
+
+    conn = None
+    try:
+        conn = await get_async_connection(database_config)
+        async with conn.transaction():  # ensures rollback on failure
+            await conn.execute(create_table_sql)
+            await conn.executemany(insert_sql, data)
+
+        logging.info(f"Table '{table_name}' created and {len(data)} rows inserted successfully.")
+
+    except Exception as e:
+        logging.error(f"Error filling table '{table_name}': {e}")
+        raise
+
+    finally:
+        if conn:
+            await conn.close()
+
+
+async def create_and_fill_avg_volume_tables_async(df_list: list[pd.DataFrame], database_config: dict):
+    """
+    Asynchronously create and fill average volume tables for multiple symbols.
+
+    Parameters
+    ----------
+    df_list : list[pd.DataFrame]
+        Each DataFrame must contain ['Symbol', 'Time', 'Avg_volume'].
+    database_config : dict
+        Database connection info for get_async_connection().
+    """
+    conn = None
+    try:
+        conn = await get_async_connection(database_config)
+
+        for df in df_list:
+            if df.empty:
+                continue
+
+            table_name = df["Symbol"].iloc[0].lower()
+            logging.info(f"Filling average volume table: {table_name}")
+
+            # Convert DataFrame to list of tuples
+            data = [
+                (row["Symbol"], row["Time"], row["Avg_volume"])
+                for _, row in df.iterrows()
+            ]
+
+            create_table_sql = f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                "Symbol" TEXT NOT NULL,
+                "Time" TIME NOT NULL,
+                "Avg_volume" NUMERIC(18, 2)
+            );
+            """
+
+            insert_sql = f"""
+            INSERT INTO {table_name} ("Symbol", "Time", "Avg_volume")
+            VALUES ($1, $2, $3);
+            """
+
+            # Use transaction for safety
+            async with conn.transaction():
+                await conn.execute(create_table_sql)
+                await conn.executemany(insert_sql, data)
+
+            logging.info(f"Inserted {len(data)} rows into '{table_name}'")
+
+    except Exception as e:
+        logging.error(f"Error inserting avg volumes: {e}")
+        raise
+
+    finally:
+        if conn:
+            await conn.close()
+
 # History data fill
 def create_and_fill_table(df, database_config):
     
@@ -464,9 +598,9 @@ async def insert_alarm(candle: CandleRow, alarm_message, database_config):
             await conn.close()
 
 
-async def alarm_exists_recently(candle:CandleRow, database_config, cutoff_minutes)-> bool:
+async def alarm_exists_recently(candle: CandleRow, alarm_signal: str, database_config, cutoff_minutes) -> bool:
     """
-    Async check if an alarm exists for the symbol within the last `cutoff_minutes`.
+    Async check if an alarm exists for the symbol and alarm type within the last `cutoff_minutes`.
     Returns True if exists, False otherwise.
     """
     conn = None
@@ -480,16 +614,60 @@ async def alarm_exists_recently(candle:CandleRow, database_config, cutoff_minute
             SELECT 1
             FROM alarms
             WHERE "Symbol" = $1
-              AND ("Date" > $2
-                   OR ("Date" = $3 AND "Time" >= $4))
+              AND "Alarm" = $2
+              AND ("Date" > $3
+                   OR ("Date" = $4 AND "Time" >= $5))
             LIMIT 1;
         """
-        row = await conn.fetchrow(query, candle.symbol, cutoff_dt.date(), cutoff_dt.date(), cutoff_dt.time())
+
+        row = await conn.fetchrow(
+            query,
+            candle.symbol,
+            alarm_signal,
+            cutoff_dt.date(),
+            cutoff_dt.date(),
+            cutoff_dt.time()
+        )
+
         return row is not None
 
     except Exception as e:
         logging.error("Error checking alarm existence: %s", e)
         return False
+
     finally:
         if conn:
             await conn.close()
+
+# if __name__ == "__main__":
+#     import asyncio
+#     from datetime import date, time
+#     from src.common.read_configs_in import read_database_config
+
+#     async def _test():
+#         candle = CandleRow(
+#             symbol="CSCO",
+#             date=date(2025, 11, 13),
+#             time=time(19, 58),
+#             open=0,
+#             high=0,
+#             low=0,
+#             close=0,
+#             volume=0,
+#             vwap=0,
+#             ema9=0,
+#             avg_volume=0,
+#             rvol=0,
+#             relatR=0
+#         )
+#         print("Testing alarm_exists_recently...candle:", candle)
+#         result = await alarm_exists_recently(
+#             candle,
+#             alarm_signal="VWAP continuation short setup dete76cted",
+#             database_config= read_database_config(filename="database.ini", section="livestream"),
+#             cutoff_minutes=80
+#         )
+
+#         print("RESULT:", result)
+
+#     asyncio.run(_test())
