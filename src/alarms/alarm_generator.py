@@ -20,15 +20,16 @@ async def generate_signal_alarm(candle: CandleRow,
     try:
         # Check if a recent alarm already exists
         if not await alarm_exists_recently(candle=candle,
+                                           alarm_message=signal_name,
                                             database_config=database_config,
+                                            
                                             cutoff_minutes=project_config["alarm_cutoff_minutes"]):
 
-            # Build alarm message
-            alarm_msg = f"{signal_name} detected"
+
 
             # Insert alarm into DB
             await insert_alarm(candle=candle,
-                                alarm_message=alarm_msg,
+                                alarm_message=signal_name,
                                 database_config=database_config)
 
             intraday_data = await get_last_rows(table_name=candle.symbol.lower(), num_rows=None, database_config=database_config)
