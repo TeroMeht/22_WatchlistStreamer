@@ -598,7 +598,7 @@ async def insert_alarm(candle: CandleRow, alarm_message, database_config):
             await conn.close()
 
 
-async def alarm_exists_recently(candle: CandleRow, alarm_signal: str, database_config, cutoff_minutes) -> bool:
+async def alarm_exists_recently(candle: CandleRow, alarm_message: str, database_config, cutoff_minutes) -> bool:
     """
     Async check if an alarm exists for the symbol and alarm type within the last `cutoff_minutes`.
     Returns True if exists, False otherwise.
@@ -623,7 +623,7 @@ async def alarm_exists_recently(candle: CandleRow, alarm_signal: str, database_c
         row = await conn.fetchrow(
             query,
             candle.symbol,
-            alarm_signal,
+            alarm_message,
             cutoff_dt.date(),
             cutoff_dt.date(),
             cutoff_dt.time()

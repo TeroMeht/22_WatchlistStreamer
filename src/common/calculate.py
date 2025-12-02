@@ -90,20 +90,26 @@ def calculate_avg_volume_model(day5_history_datas: pd.DataFrame)-> pd.DataFrame:
 
     return avg_volume_df
 
-def calculate_rvol(merged_df: pd.DataFrame) -> pd.DataFrame:
+def calculate_rvol(df: pd.DataFrame) -> pd.DataFrame:
 
-    if 'Volume' not in merged_df.columns or 'Avg_volume' not in merged_df.columns:
-        logger.error("Missing columns for Rvol calculation.")
-        merged_df['Rvol'] = 0.0
-        return merged_df
+    # Check required columns
+    required_cols = ['Volume', 'Avg_volume']
+    for c in required_cols:
+        if c not in df.columns:
+            raise ValueError(f"Missing column: {c}")
 
-    merged_df['Rvol'] = np.where(
-        (merged_df['Avg_volume'].isna()) | (merged_df['Avg_volume'] == 0),
+    # cumulative sums
+    df['CumVolume'] = df['Volume'].cumsum()
+    df['CumAvgVolume'] = df['Avg_volume'].cumsum()
+
+    # Rvol = cumulative volume / cumulative avg volume
+    df['Rvol'] = np.where(
+        (df['CumAvgVolume'] == 0) | df['CumAvgVolume'].isna(),
         0.0,
-        (merged_df['Volume'] / merged_df['Avg_volume']).round(2)
+        df['CumVolume'] / df['CumAvgVolume']
     )
 
-    return merged_df
+    return df
 
 
 def calculate_next_vwap(candle: CandleRow, historical_df: pd.DataFrame) -> CandleRow:
@@ -153,12 +159,24 @@ def calculate_next_relatr(candle: CandleRow, atr_value: float) -> CandleRow:
     return candle
 
 
-def calculate_next_rvol(candle: CandleRow, avg_volume: float) -> CandleRow:
+def calculate_next_rvol(candle: CandleRow, historical_df: pd.DataFrame, avg_volume: float) -> CandleRow:
     try:
-        if avg_volume == 0:
+        if 'Volume' not in historical_df.columns or 'Avg_volume' not in historical_df.columns:
+            candle.rvol = 0.0
+            return candle
+
+        cum_avg_vol = float(historical_df['Avg_volume'].sum())
+        cum_vol = float(historical_df['Volume'].sum())
+
+        # include the new candle
+        next_cum_vol = cum_vol + candle.volume
+        next_cum_avg_vol = cum_avg_vol + avg_volume
+
+        # safety
+        if next_cum_avg_vol <= 0:
             candle.rvol = 0.0
         else:
-            candle.rvol = round(candle.volume / avg_volume, 2)
+            candle.rvol = round(next_cum_vol / next_cum_avg_vol, 4)
 
     except Exception as e:
         logging.exception("Error calculating Rvol for %s: %s", candle.symbol, e)
@@ -186,3 +204,8 @@ def calculate_position_size(entry_price, stop_price, risk):
     except Exception as e:
         logging.error("Error calculating position size:", e)
         return None
+    
+
+
+
+

@@ -34,7 +34,7 @@ async def handle_incoming_candle(candle: CandleRow, atr_value:float ,database_co
         candle = calculate_next_vwap(candle, df_from_db)
         candle = calculate_next_ema9(candle, df_from_db)
         candle = calculate_next_relatr(candle, atr_value)
-        candle = calculate_next_rvol(candle, candle.avg_volume)
+        candle = calculate_next_rvol(candle,df_from_db, candle.avg_volume)
         return candle
     except Exception as e:
         logging.exception("Error in handle_next_vwap_and_ema9_values for %s: %s", candle.symbol, e)
