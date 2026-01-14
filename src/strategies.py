@@ -32,9 +32,25 @@ async def reversal_strategy(past_dataSet:pd.DataFrame, candle: CandleRow, projec
                                         signal_name="EMA9 crossover up",
                                         database_config=database_config,
                                         project_config=project_config)
-    else:
-        logger.info("No capitulation within 5 candles were detected for symbol: %s", candle.symbol)
+        logger.info("Running Reversal Long strategy for symbol: %s", candle.symbol)
 
+
+    # Check for euforia using the DataFrame
+    if detect_euforia(df, threshold=project_config["capitulation_threshold"]):
+        logger.debug("Euforia detected for symbol: %s. Checking EMA9 crossover...", candle.symbol)
+
+        if is_crossover_down(df.tail(2)):
+            last_row = df.iloc[-1]
+            logging.info(f"{last_row['Symbol']}: EMA9 crossover down detected, generating alarm...")
+
+            await generate_signal_alarm(candle=candle,
+                                        signal_name="EMA9 crossover down",
+                                        database_config=database_config,
+                                        project_config=project_config)        
+
+
+    else:
+        logger.info("No capitulation or euforia within 5 candles were detected for symbol: %s", candle.symbol)
 
 async def vwapcontinuation_strategies(past_dataSet:pd.DataFrame, candle: CandleRow, project_config:dict, database_config:dict):
 
@@ -72,13 +88,13 @@ async def vwapcontinuation_strategies(past_dataSet:pd.DataFrame, candle: CandleR
                 avg_relatr
             )
             # Detect capitulation
-            if detect_capitulation(df_all, threshold=project_config["capitulation_threshold"]):
-                logger.info(f"Capitulation detected earlier for symbol: {candle.symbol} now near VWAP, triggering VWAP setup alarm...")
+            # if detect_capitulation(df_all, threshold=project_config["capitulation_threshold"]):
+            #     logger.info(f"Capitulation detected earlier for symbol: {candle.symbol} now near VWAP, triggering VWAP setup alarm...")
 
-                await generate_signal_alarm(candle=candle,
-                                            signal_name="VWAP continuation short setup",
-                                            database_config=database_config,
-                                            project_config=project_config)
+            #     await generate_signal_alarm(candle=candle,
+            #                                 signal_name="VWAP continuation short setup",
+            #                                 database_config=database_config,
+            #                                 project_config=project_config)
     else:
         logger.debug("Average Relatr is neutral for symbol: %s, not near VWAP.", candle.symbol)
 
@@ -93,7 +109,7 @@ async def extreme_extension(candle: CandleRow, project_config:dict, database_con
                                     signal_name= "Extreme Extension to downside",
                                     database_config=database_config,
                                     project_config=project_config)
-    # upside alarm
+   # upside alarm
     elif candle.relatR <= -project_config["extreme_extension_threshold"]:
         logger.info(f"Extreme Extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
@@ -115,6 +131,6 @@ async def run_strategies(candle: CandleRow, project_config :dict, database_confi
 
 
     """Run all trading strategies on the finalized candle."""
-    await asyncio.gather(reversal_strategy(past_Dataset, candle, project_config,database_config),
-                         vwapcontinuation_strategies(past_Dataset, candle, project_config, database_config),
+    await asyncio.gather(#reversal_strategy(past_Dataset, candle, project_config,database_config),
+                        # vwapcontinuation_strategies(past_Dataset, candle, project_config, database_config),
                          extreme_extension(candle, project_config, database_config))
