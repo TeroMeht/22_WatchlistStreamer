@@ -80,9 +80,6 @@ async def finalize_candle(last_candle,
     logging.debug(db_ready_candle)
 
     await insert_candlestick_row(db_ready_candle,database_config)
-    # # run strategy (still in the hot path — you can offload later too)
-    # await generate_signal_alarm(last_candle,
-    #                             "Test Alarm",database_config, project_config)
     await run_strategies(last_candle,project_config, database_config)
 
 
@@ -115,7 +112,7 @@ async def process_bar(bar_buffer: BarBuffer,
     }
 
     # # add to buffer; will auto-flush when batch_size reached
-   # await bar_buffer.add(bar_data, insert_bulk_livestream, database_config)
+    await bar_buffer.add(bar_data, insert_bulk_livestream, database_config)
 
     if not store.seen_minute(symbol, interval_time):
         store.add_minute(symbol, interval_time)

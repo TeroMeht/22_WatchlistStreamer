@@ -1,6 +1,8 @@
 from src.database.db_functions import *
 from src.alarms.alarm_plotchart import plot_intraday_chart
 from src.alarms.send_telegram import *
+from src.alarms.send_postrequest import send_alarm_to_flask
+
 
 import plotly.io as pio
 import logging
@@ -18,14 +20,17 @@ async def generate_signal_alarm(candle: CandleRow,
   
       """
     try:
+        
+      # Inside generate_signal_alarm - Request Tradingappiin jotta voi tarkastaa
+      # alarmin
+        await send_alarm_to_flask(candle, signal_name)
+
         # Check if a recent alarm already exists
         if not await alarm_exists_recently(candle=candle,
                                            alarm_message=signal_name,
                                             database_config=database_config,
                                             
                                             cutoff_minutes=project_config["alarm_cutoff_minutes"]):
-
-
 
             # Insert alarm into DB
             await insert_alarm(candle=candle,
