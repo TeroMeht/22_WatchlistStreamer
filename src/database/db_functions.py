@@ -50,7 +50,7 @@ def delete_all_tables_db(database_config):
         # Drop each table except 'alarms'
         for table in tables:
             table_name = table[0]
-            if table_name == "alarms" or table_name== "livedata":
+            if table_name == "alarms" or table_name== "livedata" or table_name=="orders":
                 logging.info(f"Skipping table: {table_name}")
                 continue
             cur.execute(f'DROP TABLE IF EXISTS "{table_name}" CASCADE;')
@@ -596,6 +596,49 @@ async def insert_alarm(candle: CandleRow, alarm_message, database_config):
     finally:
         if conn:
             await conn.close()
+
+
+#------------------Order handling--------------------------------------------------------------
+
+async def insert_order(candle: CandleRow, stop_level: float, database_config: dict):
+    """
+    Async insert of an active order into the database.
+
+    :param candle: CandleRow object containing order info
+    :param stoplevel: Stop level price
+    :param database_config: Database connection configuration
+    """
+    conn = None
+    try:
+        # Get async DB connection
+        conn = await get_async_connection(database_config)
+
+        insert_query = """
+            INSERT INTO orders ("Symbol", "Time", "Stop", "Date", "Status")
+            VALUES ($1, $2, $3, $4, $5);
+        """
+
+        await conn.execute(
+            insert_query,
+            candle.symbol,     # Symbol column
+            candle.time,       # Time column
+            stop_level,         # Stop column
+            candle.date,       # Date column
+            "active"           # Status column
+        )
+
+        logging.info(
+            "Order inserted: %s %s Stop: %.2f Status: active",
+            candle.symbol, candle.time, stop_level
+        )
+
+    except Exception as e:
+        logging.error("Error inserting order: %s", e)
+
+    finally:
+        if conn:
+            await conn.close()
+
 
 
 async def alarm_exists_recently(candle: CandleRow, alarm_message: str, database_config, cutoff_minutes) -> bool:
