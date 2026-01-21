@@ -4,53 +4,107 @@ from src.database.db_functions import get_last_rows
 import asyncio
 import logging
 from src.helpers.utils import *
-
+from src.alarms.send_postrequest import send_alarm_to_flask
 
 logger = logging.getLogger(__name__)
 
 
+async def euforia_exit_strategy(
+    candle: CandleRow,
+    project_config: dict
+):
+    logger.info("Running Euforia Exit for symbol: %s", candle.symbol)
+    if candle.relatR <= -project_config["capitulation_threshold"]:
+         await send_alarm_to_flask(
+            candle=candle,
+            alarm_name="euforia"
+        )
 
+async def endofday_exit_strategy(
+    candle: CandleRow,
+    project_config: dict
+):
+    logger.info("Running End of Day Exit for symbol: %s", candle.symbol)
+
+    # Step 1: Parse end-of-day time from config
+    endofday_str = project_config["endofday"]
+
+    # Convert string "HH:MM:SS" to datetime.time
+    endofday_time = datetime.strptime(endofday_str, "%H:%M:%S").time()
+
+    # Step 2: Log candle time and check condition
+    logger.info(f"Candle time: {candle.time}, End of day time: {endofday_time}")
+    # Step 2: Check if candle.time >= end-of-day
+    if candle.time >= endofday_time:
+        await send_alarm_to_flask(
+            candle=candle,
+            alarm_name="endofday_exit"
+        )
+    else:
+        logger.debug(f"Candle time {candle.time} < endofday {endofday_time}; no alarm")
 
 
 async def reversal_strategy(past_dataSet:pd.DataFrame, candle: CandleRow, project_config:dict, database_config:dict):
 
-
-    logger.info("Running Reversal Long strategy for symbol: %s", candle.symbol)
-
     #Otetaan viimeiset 5 riviä datasta tarkastelua varten
-    df = past_dataSet.tail(5)
+    df = past_dataSet.tail(8)
 
-    # Check for capitulation using the DataFrame
-    if detect_capitulation(df, threshold=project_config["capitulation_threshold"]):
-        logger.debug("Capitulation detected for symbol: %s. Checking EMA9 crossover...", candle.symbol)
-        
-        if is_crossover_up(df.tail(2)):
-            last_row = df.iloc[-1]
-            logging.info(f"{last_row['Symbol']}: EMA9 crossover up detected, generating alarm...")
-
-            await generate_signal_alarm(candle=candle,
-                                        signal_name="EMA9 crossover up",
-                                        database_config=database_config,
-                                        project_config=project_config)
+    # jos sisään tullut candle on alle nollan niin tarkastetaan Reversal longia
+    if candle.relatR > 0: 
         logger.info("Running Reversal Long strategy for symbol: %s", candle.symbol)
 
+        # Check for capitulation using the DataFrame
+        if detect_capitulation(df, threshold=project_config["capitulation_threshold"]):
+            logger.debug("Capitulation detected for symbol: %s. Checking EMA9 crossover...", candle.symbol)
+            
+            if is_crossover_up(df.tail(2)):
+                last_row = df.iloc[-1]
+                logging.info(f"{last_row['Symbol']}: EMA9 crossover up detected, generating alarm...")
 
-    # Check for euforia using the DataFrame
-    if detect_euforia(df, threshold=project_config["capitulation_threshold"]):
-        logger.debug("Euforia detected for symbol: %s. Checking EMA9 crossover...", candle.symbol)
+                # --- Calculate stop level ---
+                stop_level = detect_stoplevel(df, direction="long")
+                logging.info(
+                    f"{candle.symbol}: Stop level set at {stop_level}"
+                )
 
-        if is_crossover_down(df.tail(2)):
-            last_row = df.iloc[-1]
-            logging.info(f"{last_row['Symbol']}: EMA9 crossover down detected, generating alarm...")
+                # Generate signal alarm with stop level
+                await generate_signal_alarm(
+                    candle=candle,
+                    signal_name="EMA9 crossover up",
+                    stop_level=stop_level,
+                    database_config=database_config,
+                    project_config=project_config
+                )
 
-            await generate_signal_alarm(candle=candle,
-                                        signal_name="EMA9 crossover down",
-                                        database_config=database_config,
-                                        project_config=project_config)        
+    # jos taas negatiivinen niin etsitään mahdollista short entryä            
+    elif candle.relatR < 0:
+
+        logger.info("Running Reversal Short strategy for symbol: %s", candle.symbol)
+
+        # Check for euforia using the DataFrame
+        if detect_euforia(df, threshold=project_config["capitulation_threshold"]):
+            logger.debug("Euforia detected for symbol: %s. Checking EMA9 crossover...", candle.symbol)
+
+            if is_crossover_down(df.tail(2)):
+                last_row = df.iloc[-1]
+                logging.info(f"{last_row['Symbol']}: EMA9 crossover down detected, generating alarm...")
+
+                # --- Calculate stop level ---
+                stop_level = detect_stoplevel(df, direction="short")
+                logging.info(
+                    f"{candle.symbol}: Stop level set at {stop_level}"
+                )
+
+                # Generate signal alarm with stop level
+                await generate_signal_alarm(
+                    candle=candle,
+                    signal_name="EMA9 crossover down",
+                    stop_level=stop_level,
+                    database_config=database_config,
+                    project_config=project_config
+                )
 
 
-    else:
-        logger.info("No capitulation or euforia within 5 candles were detected for symbol: %s", candle.symbol)
 
 async def vwapcontinuation_strategies(past_dataSet:pd.DataFrame, candle: CandleRow, project_config:dict, database_config:dict):
 
@@ -131,6 +185,10 @@ async def run_strategies(candle: CandleRow, project_config :dict, database_confi
 
 
     """Run all trading strategies on the finalized candle."""
-    await asyncio.gather(#reversal_strategy(past_Dataset, candle, project_config,database_config),
+    await asyncio.gather(reversal_strategy(past_Dataset, candle, project_config,database_config),
                         # vwapcontinuation_strategies(past_Dataset, candle, project_config, database_config),
-                         extreme_extension(candle, project_config, database_config))
+                        # extreme_extension(candle, project_config, database_config),
+                         
+                         euforia_exit_strategy(candle, project_config),
+                         endofday_exit_strategy(candle, project_config)
+                         )

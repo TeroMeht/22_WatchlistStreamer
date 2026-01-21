@@ -1,7 +1,7 @@
 from src.database.db_functions import *
 from src.alarms.alarm_plotchart import plot_intraday_chart
 from src.alarms.send_telegram import *
-from src.alarms.send_postrequest import send_alarm_to_flask
+
 
 
 import plotly.io as pio
@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)  # module-specific logger
 # Generate alarm message and insert
 async def generate_signal_alarm(candle: CandleRow,
                                 signal_name: str,
+                                stop_level:float,
                                 database_config: dict,
                                 project_config: dict)-> None:
     """
@@ -21,21 +22,21 @@ async def generate_signal_alarm(candle: CandleRow,
       """
     try:
         
-      # Inside generate_signal_alarm - Request Tradingappiin jotta voi tarkastaa
-      # alarmin
-        await send_alarm_to_flask(candle, signal_name)
 
         # Check if a recent alarm already exists
         if not await alarm_exists_recently(candle=candle,
                                            alarm_message=signal_name,
-                                            database_config=database_config,
-                                            
+                                            database_config=database_config,                               
                                             cutoff_minutes=project_config["alarm_cutoff_minutes"]):
 
             # Insert alarm into DB
             await insert_alarm(candle=candle,
                                 alarm_message=signal_name,
                                 database_config=database_config)
+            # Insert active order to DB
+            await insert_order(candle=candle,
+                               stop_level=stop_level,
+                               database_config=database_config)
 
             intraday_data = await get_last_rows(table_name=candle.symbol.lower(), num_rows=None, database_config=database_config)
             # Create and show plot
