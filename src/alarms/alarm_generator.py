@@ -14,31 +14,26 @@ logger = logging.getLogger(__name__)  # module-specific logger
 async def generate_signal_alarm(candle: CandleRow,
                                 signal_name: str,
                                 stop_level:float,
-                                database_config: dict,
                                 project_config: dict)-> None:
     """
     Builds and sends an EMA9 crossover alarm if no recent duplicate exists.
   
       """
     try:
-        
-
+      
         # Check if a recent alarm already exists
         if not await alarm_exists_recently(candle=candle,
-                                           alarm_message=signal_name,
-                                            database_config=database_config,                               
+                                           alarm_message=signal_name,                             
                                             cutoff_minutes=project_config["alarm_cutoff_minutes"]):
 
             # Insert alarm into DB
             await insert_alarm(candle=candle,
-                                alarm_message=signal_name,
-                                database_config=database_config)
+                                alarm_message=signal_name)
             # Insert active order to DB
             await insert_order(candle=candle,
-                               stop_level=stop_level,
-                               database_config=database_config)
+                               stop_level=stop_level)
 
-            intraday_data = await get_last_rows(table_name=candle.symbol.lower(), num_rows=None, database_config=database_config)
+            intraday_data = await get_last_rows(table_name=candle.symbol.lower(), num_rows=None)
             # Create and show plot
 
             fig = plot_intraday_chart(intraday_data)

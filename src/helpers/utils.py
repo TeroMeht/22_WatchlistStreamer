@@ -28,7 +28,7 @@ def validate_datasets(df_list:List[pd.DataFrame], tickers:list, dataset_name:str
     return found or set()   #  ensures it never returns None
 
 
-def detect_stoplevel(df: pd.DataFrame, direction: str, offset: float = 0.02) -> float:
+def detect_stoplevel(df: pd.DataFrame, direction: str, offset: float = 0.06) -> float:
     """
     Calculate stop level based on recent High/Low in DataFrame.
 

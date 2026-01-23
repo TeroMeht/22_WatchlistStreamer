@@ -1,8 +1,6 @@
 import pandas as pd
 import logging
 from src.helpers.handle_candles import *
-from src.database.db_functions import *
-from typing import List
 import numpy as np
 
 logger = logging.getLogger(__name__)  # module-specific logger

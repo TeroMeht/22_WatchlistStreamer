@@ -123,8 +123,6 @@ async def fetch_intraday_volume_history(ib: IB, symbol: str, time_zone: str):
 async def monitor_tickers(  bar_buffer,
                             candle_store,
                             project_config,
-                            database_config,
-                            database_avgvolume_config,
                             atr,
                             ib: IB, 
                             symbol: str):
@@ -145,8 +143,6 @@ async def monitor_tickers(  bar_buffer,
                 await process_bar(bar_buffer,
                                 candle_store,
                                 project_config,
-                                database_config,
-                                database_avgvolume_config,
                                 atr,
                                 symbol, 
                                 bar) 
