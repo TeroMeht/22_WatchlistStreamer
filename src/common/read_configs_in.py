@@ -20,12 +20,3 @@ def read_database_config(filename,section):
     return db
 
 
-
-# ✅ Optional: Project-level JSON config
-def read_project_config(config_file):
-    """
-    Read a JSON project configuration file and return as dict.
-    """
-    with open(config_file, 'r') as f:
-        config = json.load(f)
-    return config

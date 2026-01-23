@@ -1,33 +1,42 @@
-from src.common.logging_config import setup_logging
 import asyncio
 
-from src.common.read_configs_in import read_database_config, read_project_config
+from src.common.logging_config import setup_logging
+from src.common.read_configs_in import (
+    read_database_config,
+)
+from src.dependencies import *
 from src.streamer.datastreamer import run_streamer
-from src.symbol_loader.loader import load_symbols_from_folder
 
 
 
-# 1️Setup logging first
+
+# 1️⃣ Setup logging first
 setup_logging()
 
 
+async def main() -> None:
+    """
+    Main entry: loads configuration, initializes dependencies,
+    and triggers the live streamer.
+    """
 
-# --- Main entry point ---
-async def main()-> None:
-    """
-    Main entry: loads configuration and triggers the live streamer.
-    """
     # Load configuration files
-    database_config = read_database_config(filename="database.ini", section="livestream")
-    database_avgvolume_config = read_database_config(filename="database.ini", section="avgvolume")
+    database_config = read_database_config(
+        filename="database.ini",
+        section="livestream",
+    )
 
-    project_config = read_project_config(config_file="config.json")
+    #  Initialize global DB pool (ONCE)
+    await init_db_pool(database_config)
+    
 
-    # Load symbols
-    symbols = load_symbols_from_folder(project_config["tickers_folder"])
+    try:
+        # Run main streamer logic
+        await run_streamer()
 
-    # Call the streamer function
-    await run_streamer(symbols, project_config, database_config, database_avgvolume_config)
+    finally:
+        # Always close pool on shutdown
+        await close_db_pool()
 
 
 # --- Script execution ---

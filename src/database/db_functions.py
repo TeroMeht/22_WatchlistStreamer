@@ -1,91 +1,71 @@
-import psycopg2
 import pandas as pd
-from decimal import Decimal
+
 from src.common.calculate import *
 from src.helpers.handle_candles import *
 
 from datetime import datetime, timedelta
 import logging
 
-import asyncpg
 from src.helpers.utils import *
+from src.dependencies import get_db_pool
+
 
 logger = logging.getLogger(__name__)  # module-specific logger
 
 
-def get_connection_and_cursor(database_config):
-    """Create and return a database connection and cursor."""
-    conn = psycopg2.connect(**database_config)
-    if not conn:
-        raise Exception("Failed to connect to database.")
-    cur = conn.cursor()
-    return conn, cur
 
-def delete_all_tables_db(database_config):
-    conn = None
-    cur = None
+async def delete_all_tables_db_async() -> None:
     try:
-        # Check database name first
-        db_name = database_config.get("database")
-        if db_name != "livestreaming" and db_name != "volumemodels":
-            logging.info(f"Aborting: database is '{db_name}', not 'livestreaming' or 'volumemodels'.")
-            return
+        pool = get_db_pool()
 
-        conn, cur = get_connection_and_cursor(database_config)
-        # Fetch all table names
-        cur.execute("""
-            SELECT tablename
-            FROM pg_tables
-            WHERE schemaname = 'public';
-        """)
-        tables = cur.fetchall()
+        async with pool.acquire() as conn:
+            # Optional safety check (still useful)
+            db_name = await conn.fetchval("SELECT current_database();")
+            if db_name not in ("livestreaming", "volumemodels"):
+                logger.info(
+                    f"Aborting: database is '{db_name}', not 'livestreaming' or 'volumemodels'."
+                )
+                return
 
-        if not tables:
-            logging.warning("No tables found in the database.")
-            return
+            # Fetch all table names
+            tables = await conn.fetch("""
+                SELECT tablename
+                FROM pg_tables
+                WHERE schemaname = 'public';
+            """)
 
-        # Disable foreign key checks
-        cur.execute("SET session_replication_role = replica;")
+            if not tables:
+                logger.warning("No tables found in the database.")
+                return
 
-        # Drop each table except 'alarms'
-        for table in tables:
-            table_name = table[0]
-            if table_name == "alarms" or table_name== "livedata" or table_name=="orders":
-                logging.info(f"Skipping table: {table_name}")
-                continue
-            cur.execute(f'DROP TABLE IF EXISTS "{table_name}" CASCADE;')
-            logging.info(f"Dropped table: {table_name}")
+            # Disable foreign key checks
+            await conn.execute("SET session_replication_role = replica;")
 
-        # Re-enable foreign key checks
-        cur.execute("SET session_replication_role = DEFAULT;")
+            protected_tables = {"alarms", "livedata", "orders"}
 
-        conn.commit()
+            for record in tables:
+                table_name = record["tablename"]
 
-    except Exception as e:
-        logging.error(f"Error: {e}")
-        if conn:
-            conn.rollback()
-    finally:
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
+                if table_name in protected_tables:
+                    logger.info(f"Skipping table: {table_name}")
+                    continue
+
+                await conn.execute(
+                    f'DROP TABLE IF EXISTS "{table_name}" CASCADE;'
+                )
+                logger.info(f"Dropped table: {table_name}")
+
+            # Re-enable foreign key checks
+            await conn.execute("SET session_replication_role = DEFAULT;")
+
+    except Exception:
+        logger.exception("Error deleting tables")
+        raise
 
 
-async def create_and_fill_table_async(df: pd.DataFrame, database_config: dict):
-    """
-    Asynchronously creates a table for the given DataFrame's symbol and inserts all rows.
+async def create_and_fill_table_async(df: pd.DataFrame)-> None:
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame containing historical data with columns:
-        Symbol, Date, Time, Open, High, Low, Close, Volume, VWAP, EMA9, Avg_volume, Rvol, Relatr
-    database_config : dict
-        Database connection parameters.
-    """
     table_name = df["Symbol"].iloc[0]
-
 
     # Convert DataFrame to list of tuples
     data = [
@@ -133,42 +113,40 @@ async def create_and_fill_table_async(df: pd.DataFrame, database_config: dict):
 
     conn = None
     try:
-        conn = await get_async_connection(database_config)
+        # 🔁 CHANGED: use global pool instead of direct connection
+        pool = get_db_pool()
+        conn = await pool.acquire()
+
         async with conn.transaction():  # ensures rollback on failure
             await conn.execute(create_table_sql)
             await conn.executemany(insert_sql, data)
 
-        logging.info(f"Table '{table_name}' created and {len(data)} rows inserted successfully.")
+        logging.info(
+            f"Table '{table_name}' created and {len(data)} rows inserted successfully."
+        )
 
     except Exception as e:
         logging.error(f"Error filling table '{table_name}': {e}")
         raise
 
     finally:
+        # 🔁 CHANGED: release connection back to pool
         if conn:
-            await conn.close()
+            await pool.release(conn)
 
 
-async def create_and_fill_avg_volume_tables_async(df_list: list[pd.DataFrame], database_config: dict):
-    """
-    Asynchronously create and fill average volume tables for multiple symbols.
+async def create_and_fill_avg_volume_tables_async(df_list: list[pd.DataFrame]):
 
-    Parameters
-    ----------
-    df_list : list[pd.DataFrame]
-        Each DataFrame must contain ['Symbol', 'Time', 'Avg_volume'].
-    database_config : dict
-        Database connection info for get_async_connection().
-    """
-    conn = None
     try:
-        conn = await get_async_connection(database_config)
+
+        pool = get_db_pool()
+        conn = await pool.acquire()
 
         for df in df_list:
             if df.empty:
                 continue
 
-            table_name = df["Symbol"].iloc[0].lower()
+            table_name = f"{df['Symbol'].iloc[0].lower()}_volume_model"
             logging.info(f"Filling average volume table: {table_name}")
 
             # Convert DataFrame to list of tuples
@@ -202,179 +180,22 @@ async def create_and_fill_avg_volume_tables_async(df_list: list[pd.DataFrame], d
         raise
 
     finally:
+        # 🔁 CHANGED: release connection back to pool
         if conn:
-            await conn.close()
-
-# History data fill
-def create_and_fill_table(df, database_config):
-    
-    try:
-        # Get table name from the first row's symbol in the DataFrame
-        table_name = df["Symbol"].iloc[0]
-        logging.info(f"Filling database table: {table_name}")
-        # Convert DataFrame to list of tuples
-        data = [
-            (
-                row["Symbol"],
-                row["Date"],
-                row["Time"],
-                row["Open"],
-                row["High"],
-                row["Low"],
-                row["Close"],
-                row["Volume"],
-                row["VWAP"],
-                row["EMA9"],
-                row["Avg_volume"],
-                row["Rvol"],
-                row["Relatr"]
-            )
-            for _, row in df.iterrows()
-        ]
-
-        # Build SQL with capitalized column names
-        create_table_sql = f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                "Symbol" TEXT NOT NULL,
-                "Date" DATE NOT NULL,
-                "Time" TIME NOT NULL,
-                "Open" NUMERIC(10, 2),
-                "High" NUMERIC(10, 2),
-                "Low" NUMERIC(10, 2),
-                "Close" NUMERIC(10, 2),
-                "Volume" NUMERIC(18, 2),
-                "VWAP" NUMERIC(10, 2),
-                "EMA9" NUMERIC(10, 2),
-                "Avg_volume" NUMERIC(18, 2),
-                "Rvol" NUMERIC(10, 2),
-                "Relatr" NUMERIC(10, 2)
-
-            );
-        """
-
-        insert_sql = f"""
-        INSERT INTO {table_name} 
-        ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr")
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-        """
-
-        conn, cur = get_connection_and_cursor(database_config)
-
-        # Create table if not exists
-        cur.execute(create_table_sql)
-
-        # Insert multiple rows
-        cur.executemany(insert_sql, data)
-
-        conn.commit()
-       # print(f"Table '{table_name}' created and {len(data)} rows inserted successfully.")
-
-    except Exception as e:
-        logging.error(f"Error: {e}")
-        if conn:
-            conn.rollback()
-    finally:
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
-
-def create_and_fill_avg_volume_tables(df_list, database_config):
-    """
-    Create and fill average volume tables for multiple symbols.
-
-    Parameters
-    ----------
-    df_list : list[pd.DataFrame]
-        Each DataFrame must contain ['Symbol', 'Time', 'Avg_volume'].
-    database_config : dict
-        Database connection info for get_connection_and_cursor().
-    """
-    conn, cur = None, None
-    try:
-        conn, cur = get_connection_and_cursor(database_config)
-
-        for df in df_list:
-            if df.empty:
-                continue
-
-            # Table name = lowercase symbol name
-            table_name = df["Symbol"].iloc[0].lower()
-            logging.info(f"Filling average volume table: {table_name}")
-
-            # Prepare data
-            data = [
-                (row["Symbol"], row["Time"], row["Avg_volume"])
-                for _, row in df.iterrows()
-            ]
-
-            # Create table if not exists
-            create_table_sql = f"""
-                CREATE TABLE IF NOT EXISTS {table_name} (
-                    "Symbol" TEXT NOT NULL,
-                    "Time" TIME NOT NULL,
-                    "Avg_volume" NUMERIC(18, 2)
-                );
-            """
-
-            # Insert statement
-            insert_sql = f"""
-                INSERT INTO {table_name} ("Symbol", "Time", "Avg_volume")
-                VALUES (%s, %s, %s);
-            """
-
-            # Execute SQL
-            cur.execute(create_table_sql)
-            cur.executemany(insert_sql, data)
-            conn.commit()
-
-            logging.info(f" Inserted {len(data)} rows into '{table_name}'")
-
-    except Exception as e:
-        logging.error(f" Error inserting avg volumes: {e}")
-        if conn:
-            conn.rollback()
-    finally:
-        if cur:
-            cur.close()
-        if conn:
-            conn.close()
-
-async def get_async_connection(database_config:dict)-> asyncpg.Connection:
-    """
-    Create and return an async database connection.
-
-    Parameters
-    ----------
-    database_config : dict
-        Dictionary with keys: user, password, database, host, port (optional)
-
-    Returns
-    -------
-    asyncpg.Connection
-    """
-    try:
-        conn = await asyncpg.connect(
-            user=database_config["user"],
-            password=database_config["password"],
-            database=database_config["database"],
-            host=database_config["host"],
-            port=int(database_config.get("port", 5432))
-        )
-        return conn
-    except Exception as e:
-        logging.exception("Failed to create async database connection: %s", e)
-        raise
+            await pool.release(conn)
 
 
-async def insert_candlestick_row(last_candle: CandleRow, database_config: dict):
+async def insert_candlestick_row(last_candle: CandleRow):
     """
     Async: Save a single candlestick row to the database if it doesn't already exist.
     Uses CandleRow dataclass for type safety and Decimal precision.
     """
 
     symbol = last_candle.symbol.lower()
-    conn = await get_async_connection(database_config)
+
+    # Get database connection from pool
+    pool = get_db_pool()
+    conn = await pool.acquire()
 
     try:
         # Convert CandleRow → tuple for DB insertion
@@ -418,21 +239,20 @@ async def insert_candlestick_row(last_candle: CandleRow, database_config: dict):
         logging.exception(f" Error inserting row for {last_candle.symbol}: {e}")
 
     finally:
+        # 🔁 CHANGED: release connection back to pool
         if conn:
-            await conn.close()
+            await pool.release(conn)
 
 
-async def insert_bulk_livestream(bars: list[dict], database_config: dict):
-    """
-    Bulk insert a list of 5-second RealTimeBars into the 'livedata' table.
-    Each item in `bars` must contain:
-        symbol, time (datetime), last (float), volume (float)
-    """
+async def insert_bulk_livestream(bars: list[dict]):
+    # Get database connection from pool
+    pool = get_db_pool()
+    conn = await pool.acquire()
+
     if not bars:
         return
 
     try:
-        conn = await get_async_connection(database_config)
 
         # Create table if it doesn't exist
         create_table_query = """
@@ -474,30 +294,22 @@ async def insert_bulk_livestream(bars: list[dict], database_config: dict):
     except Exception as e:
         logging.exception("Error inserting bars into livedata table: %s", e)
 
+    finally:
+        # 🔁 CHANGED: release connection back to pool
+        if conn:
+            await pool.release(conn)
 
-async def fetch_avg_volume_for_candle(candle_row: CandleRow, database_avgvolume_config) -> float:
-    """
-    Fetch the average volume for a given candle's symbol and time from the avg volume table.
 
-    Parameters
-    ----------
-    candle_row : CandleRow
-        Dataclass instance containing at least .symbol and .time.
-    database_avgvolume_config : dict
-        Database configuration to connect to the average volume DB.
+async def fetch_avg_volume_for_candle(candle_row: CandleRow) -> float:
+    # Get database connection from pool
+    pool = get_db_pool()
+    conn = await pool.acquire()
 
-    Returns
-    -------
-    float
-        The Avg_volume value for that candle, or 0.0 if not found.
-    """
-    conn = None
+
     try:
         symbol = candle_row.symbol
         time_val = candle_row.time
-        table_name = symbol.lower()
-
-        conn = await get_async_connection(database_avgvolume_config)
+        table_name = f"{symbol.lower()}_volume_model"
 
         query = f"""
             SELECT "Avg_volume"
@@ -515,22 +327,21 @@ async def fetch_avg_volume_for_candle(candle_row: CandleRow, database_avgvolume_
         return 0.0
 
     finally:
+        # 🔁 CHANGED: release connection back to pool
         if conn:
-            await conn.close()
+            await pool.release(conn)
+
 
 
 #-----------------Alarms handling----------------------------------------------------------------
 
+async def get_last_rows(table_name:str, num_rows:int):
 
-async def get_last_rows(table_name:str, num_rows=None, database_config=None):
-    """
-    Fetch the last `num_rows` from the given table asynchronously.
-    If num_rows is None, fetch all available rows.
-    Returns a pandas DataFrame.
-    """
-    conn = None
+    # Get database connection from pool
+    pool = get_db_pool()
+    conn = await pool.acquire()
+
     try:
-        conn = await get_async_connection(database_config)
 
         if num_rows is None:
             # Fetch all rows
@@ -569,15 +380,17 @@ async def get_last_rows(table_name:str, num_rows=None, database_config=None):
         return pd.DataFrame()
 
     finally:
+        # 🔁 CHANGED: release connection back to pool
         if conn:
-            await conn.close()
+            await pool.release(conn)
 
 
-async def insert_alarm(candle: CandleRow, alarm_message, database_config):
-    """Async insert of an alarm into the database."""
-    conn = None
+async def insert_alarm(candle: CandleRow, alarm_message:str):
+    # Get database connection from pool
+    pool = get_db_pool()
+    conn = await pool.acquire()
+
     try:
-        conn = await get_async_connection(database_config)
 
         insert_query = """
             INSERT INTO alarms ("Symbol", "Time", "Alarm", "Date")
@@ -594,24 +407,30 @@ async def insert_alarm(candle: CandleRow, alarm_message, database_config):
     except Exception as e:
         logging.error("Error inserting alarm: %s", e)
     finally:
+        # 🔁 CHANGED: release connection back to pool
         if conn:
-            await conn.close()
-
+            await pool.release(conn)
 
 #------------------Order handling--------------------------------------------------------------
 
-async def insert_order(candle: CandleRow, stop_level: float, database_config: dict):
-    """
-    Async insert of an active order into the database.
+async def insert_order(candle: CandleRow, stop_level: float):
+    # Get database connection from pool
+    pool = get_db_pool()
+    conn = await pool.acquire()
 
-    :param candle: CandleRow object containing order info
-    :param stoplevel: Stop level price
-    :param database_config: Database connection configuration
-    """
-    conn = None
     try:
-        # Get async DB connection
-        conn = await get_async_connection(database_config)
+        # Ensure orders table exists (with id)
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS orders (
+            "Id" BIGSERIAL PRIMARY KEY,
+            "Symbol" TEXT NOT NULL,
+            "Time" TIME NOT NULL,
+            "Stop" NUMERIC(10, 2) NOT NULL,
+            "Date" DATE NOT NULL,
+            "Status" TEXT NOT NULL
+        );
+        """
+        await conn.execute(create_table_query)
 
         insert_query = """
             INSERT INTO orders ("Symbol", "Time", "Stop", "Date", "Status")
@@ -636,19 +455,17 @@ async def insert_order(candle: CandleRow, stop_level: float, database_config: di
         logging.error("Error inserting order: %s", e)
 
     finally:
+        # 🔁 CHANGED: release connection back to pool
         if conn:
-            await conn.close()
+            await pool.release(conn)
 
 
+async def alarm_exists_recently(candle: CandleRow, alarm_message: str, cutoff_minutes) -> bool:
+    # Get database connection from pool
+    pool = get_db_pool()
+    conn = await pool.acquire()
 
-async def alarm_exists_recently(candle: CandleRow, alarm_message: str, database_config, cutoff_minutes) -> bool:
-    """
-    Async check if an alarm exists for the symbol and alarm type within the last `cutoff_minutes`.
-    Returns True if exists, False otherwise.
-    """
-    conn = None
     try:
-        conn = await get_async_connection(database_config)
 
         current_dt = datetime.combine(candle.date, candle.time)
         cutoff_dt = current_dt - timedelta(minutes=cutoff_minutes)
@@ -679,38 +496,7 @@ async def alarm_exists_recently(candle: CandleRow, alarm_message: str, database_
         return False
 
     finally:
+        # 🔁 CHANGED: release connection back to pool
         if conn:
-            await conn.close()
+            await pool.release(conn)
 
-# if __name__ == "__main__":
-#     import asyncio
-#     from datetime import date, time
-#     from src.common.read_configs_in import read_database_config
-
-#     async def _test():
-#         candle = CandleRow(
-#             symbol="CSCO",
-#             date=date(2025, 11, 13),
-#             time=time(19, 58),
-#             open=0,
-#             high=0,
-#             low=0,
-#             close=0,
-#             volume=0,
-#             vwap=0,
-#             ema9=0,
-#             avg_volume=0,
-#             rvol=0,
-#             relatR=0
-#         )
-#         print("Testing alarm_exists_recently...candle:", candle)
-#         result = await alarm_exists_recently(
-#             candle,
-#             alarm_signal="VWAP continuation short setup dete76cted",
-#             database_config= read_database_config(filename="database.ini", section="livestream"),
-#             cutoff_minutes=80
-#         )
-
-#         print("RESULT:", result)
-
-#     asyncio.run(_test())

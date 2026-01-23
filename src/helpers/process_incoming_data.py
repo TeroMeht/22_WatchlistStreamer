@@ -24,11 +24,11 @@ from zoneinfo import ZoneInfo
 
 
 
-async def handle_incoming_candle(candle: CandleRow, atr_value:float ,database_config: dict, database_avgvolume_config: dict) -> CandleRow:
+async def handle_incoming_candle(candle: CandleRow, atr_value:float) -> CandleRow:
     try:
         df_from_db, avg_volume = await asyncio.gather(
-            get_last_rows(table_name=candle.symbol.lower(), num_rows=None, database_config=database_config),
-            fetch_avg_volume_for_candle(candle, database_avgvolume_config)
+            get_last_rows(table_name=candle.symbol.lower(), num_rows=None),
+            fetch_avg_volume_for_candle(candle)
         )
         candle.avg_volume = avg_volume
         candle = calculate_next_vwap(candle, df_from_db)
@@ -44,9 +44,6 @@ async def handle_incoming_candle(candle: CandleRow, atr_value:float ,database_co
 
 
 async def finalize_candle(last_candle,
-                          project_config: dict,
-                          database_config: dict,
-                          database_avgvolume_config: dict,
                           atr_value: float,
                           symbol: str,
                           price):
@@ -71,27 +68,25 @@ async def finalize_candle(last_candle,
                             rvol=None
                         )
     # calculations
-    last_candle = await handle_incoming_candle(last_candle, atr_value, database_config,database_avgvolume_config)
+    last_candle = await handle_incoming_candle(last_candle, atr_value)
     
 
 
 
     db_ready_candle = enforce_candle_row_types(last_candle)  # Ensure all floats
-    logging.debug(db_ready_candle)
 
-    await insert_candlestick_row(db_ready_candle,database_config)
-    await run_strategies(last_candle,project_config, database_config)
+
+    await insert_candlestick_row(db_ready_candle)
+    await run_strategies(last_candle)
 
 
 
 async def process_bar(bar_buffer: BarBuffer,
                       store: CandleStore,
                       project_config: dict,
-                      database_config: dict,
-                      database_avgvolume_config: dict,
                       atr_value: float,
                       symbol: str,
-                      bar: 'RealTimeBar'):
+                      bar: RealTimeBar):
     """
     Process incoming 5-sec bar into aggregated 2-min candlesticks.
     """
@@ -112,7 +107,7 @@ async def process_bar(bar_buffer: BarBuffer,
     }
 
     # # add to buffer; will auto-flush when batch_size reached
-    await bar_buffer.add(bar_data, insert_bulk_livestream, database_config)
+   # await bar_buffer.add(bar_data, insert_bulk_livestream)
 
     if not store.seen_minute(symbol, interval_time):
         store.add_minute(symbol, interval_time)
@@ -121,7 +116,7 @@ async def process_bar(bar_buffer: BarBuffer,
             # First, apply the last bar to the previous candle
             store.update_candle(symbol, bar.close, bar.volume)
             # Then finalize
-            await finalize_candle(last_candle, project_config, database_config, database_avgvolume_config, atr_value, symbol, bar.close)
+            await finalize_candle(last_candle, atr_value, symbol, bar.close)
 
         # Start a new candle for the current interval
         store.append_candle(symbol, {
