@@ -27,7 +27,8 @@ from zoneinfo import ZoneInfo
 async def handle_incoming_candle(candle: CandleRow, atr_value:float) -> CandleRow:
     try:
         df_from_db, avg_volume = await asyncio.gather(
-            get_last_rows(table_name=candle.symbol.lower(), num_rows=None),
+            get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=None),
+                          
             fetch_avg_volume_for_candle(candle)
         )
         candle.avg_volume = avg_volume

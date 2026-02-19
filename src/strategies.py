@@ -171,25 +171,25 @@ async def run_strategies(candle: CandleRow):
 
 
     # Hae data tältä sisääntulleelta kynttilältä
-    last_8_rows = await get_last_rows(table_name=candle.symbol.lower(), num_rows=8)
+    last_8_rows = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
 
     # Prepare a list of coroutines to run
     tasks = []
 
-    # Example thresholds — adjust to your logic
-    if candle.relatR > 0:
+    # Thresholds — adjust to your logic
+    if candle.relatR > 0 and candle.rvol >= 1.5: # ei ole riittävän in play jos Rvol jää tämän alapuolelle
         tasks.append(reversal_strategy(last_8_rows, candle))
 
-    elif candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]:
+    if candle.relatR < 0 and candle.rvol >= 1.5:
+        tasks.append(reversal_short_strategy(last_8_rows, candle))
+
+    if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]:
         tasks.append(capitulation_exit_strategy(candle))
 
-    elif candle.relatR <= -CLIENT_CONFIG["capitulation_threshold"]:
+    if candle.relatR <= -CLIENT_CONFIG["capitulation_threshold"]:
         tasks.append(euforia_exit_strategy(candle))
-
-    elif candle.relatR < 0:
-        tasks.append(reversal_short_strategy(last_8_rows, candle))
         
-    elif candle.time >= CLIENT_CONFIG["endofday"]:
+    if candle.time >= CLIENT_CONFIG["endofday"]:
         tasks.append(endofday_exit_strategy(candle))
 
     # Run all selected strategies concurrently
