@@ -41,7 +41,7 @@ async def delete_all_tables_db_async() -> None:
             # Disable foreign key checks
             await conn.execute("SET session_replication_role = replica;")
 
-            protected_tables = {"alarms", "livedata", "orders"}
+            protected_tables = {"alarms", "livedata", "orders","exit_requests"}
 
             for record in tables:
                 table_name = record["tablename"]
@@ -65,7 +65,7 @@ async def delete_all_tables_db_async() -> None:
 
 async def create_and_fill_table_async(df: pd.DataFrame)-> None:
 
-    table_name = df["Symbol"].iloc[0]
+    table_name = f"{df["Symbol"].iloc[0]}_livestream"
 
     # Convert DataFrame to list of tuples
     data = [
@@ -192,7 +192,7 @@ async def insert_candlestick_row(last_candle: CandleRow):
     """
 
     symbol = last_candle.symbol.lower()
-
+    table_name = f"{symbol}_livestream"
     # Get database connection from pool
     pool = get_db_pool()
     conn = await pool.acquire()
@@ -217,23 +217,23 @@ async def insert_candlestick_row(last_candle: CandleRow):
 
         # --- Check if record already exists ---
         check_sql = f"""
-        SELECT 1 FROM "{symbol}"
+        SELECT 1 FROM "{table_name}"
         WHERE "Symbol"=$1 AND "Date"=$2 AND "Time"=$3
         LIMIT 1;
         """
         exists = await conn.fetchrow(check_sql, last_candle.symbol, last_candle.date, last_candle.time)
         if exists:
-            logging.info(f"Skipped duplicate candle for {last_candle.symbol}: {last_candle}")
+           # logging.info(f"Skipped duplicate candle for {last_candle.symbol}: {last_candle}")
             return
 
         # --- Insert new record ---
         insert_sql = f"""
-        INSERT INTO "{symbol}" 
+        INSERT INTO "{table_name}" 
         ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9","Avg_volume", "Rvol","Relatr")
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13);
         """
         await conn.execute(insert_sql, *db_row)
-        logging.info(f"Inserted candle into '{symbol}': {last_candle}")
+       # logging.info(f"Inserted candle into '{symbol}': {last_candle}")
 
     except Exception as e:
         logging.exception(f" Error inserting row for {last_candle.symbol}: {e}")

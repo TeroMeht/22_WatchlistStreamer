@@ -33,7 +33,7 @@ async def generate_signal_alarm(candle: CandleRow,
             await insert_order(candle=candle,
                                stop_level=stop_level)
 
-            intraday_data = await get_last_rows(table_name=candle.symbol.lower(), num_rows=None)
+            intraday_data = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=None)
             # Create and show plot
 
             fig = plot_intraday_chart(intraday_data)
