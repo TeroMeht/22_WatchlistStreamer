@@ -17,6 +17,6 @@ CLIENT_CONFIG = {
     "barbuffer_size": 1000,
     "alarm_cutoff_minutes": 10,
     "endofday": time(22,50),
-    "flask_url": str("http://127.0.0.1:8080/api/portfoliomanager"),
-    "livestream_endpoint": str("http://127.0.0.1:8080/api/livestream/emit")
+    "exit-request_endpoint": str("http://127.0.0.1:8000/api/portfolio/exit-request"),
+    "alarms_endpoint": str("http://127.0.0.1:8000/api/alarms/emit")
 }

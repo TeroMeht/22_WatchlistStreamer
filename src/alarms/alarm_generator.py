@@ -1,6 +1,7 @@
 from src.database.db_functions import *
 from src.alarms.alarm_plotchart import plot_intraday_chart
 from src.alarms.send_telegram import *
+from src.alarms.send_postrequest import *
 
 
 
@@ -29,21 +30,40 @@ async def generate_signal_alarm(candle: CandleRow,
             # Insert alarm into DB
             await insert_alarm(candle=candle,
                                 alarm_message=signal_name)
+            
             # Insert active order to DB
             await insert_order(candle=candle,
                                stop_level=stop_level)
+            
+             # Send alarm to FastAPI asynchronously
+            await send_alarm_to_fastapi(candle=candle, alarm_message=signal_name, fastapi_url=project_config["alarms_endpoint"])
 
             intraday_data = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=None)
             # Create and show plot
 
+            alarm_message = f"{candle.symbol}: {signal_name} detected, Rvol: {candle.rvol}:"
+
+            # Send photo
             fig = plot_intraday_chart(intraday_data)
             # Convert figure to image in-memory (byte object)
             image_bytes = pio.to_image(fig, format='png')  # Convert to PNG in memory
-
-            alarm_message = f"{candle.symbol}: {signal_name} detected, Rvol: {candle.rvol}:"
             await send_telegram_picture(project_config, image_bytes, alarm_message)  # Send directly to Telegram
+            
+            # # Send ONLY message (no picture)
+            # await send_telegram_message(
+            #     symbol=candle.symbol,
+            #     time_obj=candle.time,
+            #     alarm_message=alarm_message,
+            #     bot_token=project_config["BOT_TOKEN"],
+            #     chat_id=project_config["CHAT_ID"],
+            # )
 
-            logging.info(f"{candle.symbol}: Signal alarm '{signal_name}' sent successfully.")
+            logging.info(
+                "%s: Signal alarm '%s' sent successfully.",
+                candle.symbol,
+                signal_name
+            )
+
 
     except Exception as e:
         logging.error(f"Error generating signal alarm for {candle.symbol}: {e}")
