@@ -4,7 +4,7 @@ from src.database.db_functions import get_last_rows
 import asyncio
 import logging
 from src.helpers.utils import *
-from src.alarms.send_postrequest import send_alarm_to_flask
+from src.alarms.send_postrequest import send_alarm_to_fastapi, send_exit_request_to_fastapi
 from config import CLIENT_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -16,28 +16,28 @@ async def euforia_exit_strategy(candle: CandleRow):
 
     logger.info("Running Euforia Exit for long symbol: %s", candle.symbol)
 
-    await send_alarm_to_flask(
+    await send_exit_request_to_fastapi(
         candle=candle,
         alarm_name="euforia",
-        flask_url=CLIENT_CONFIG["flask_url"]
+        fastapi_url=CLIENT_CONFIG["exit-request_endpoint"]
     )
 
 async def capitulation_exit_strategy(candle: CandleRow):
 
     logger.info("Running Capitulation Exit for short symbol: %s", candle.symbol)
-    await send_alarm_to_flask(
+    await send_exit_request_to_fastapi(
         candle=candle,
         alarm_name="capitulation",
-        flask_url=CLIENT_CONFIG["flask_url"]
+        fastapi_url=CLIENT_CONFIG["exit-request_endpoint"]
 )
 
 async def endofday_exit_strategy(candle: CandleRow):
     logger.info("Running End of Day Exit for symbol: %s", candle.symbol)
 
-    await send_alarm_to_flask(
+    await send_exit_request_to_fastapi(
         candle=candle,
         alarm_name="endofday_exit",
-        flask_url=CLIENT_CONFIG["flask_url"]
+        fastapi_url=CLIENT_CONFIG["exit-request_endpoint"]
     )
 
 async def reversal_strategy(last_8_rows:pd.DataFrame, candle: CandleRow):
@@ -170,17 +170,18 @@ async def extreme_extension(candle: CandleRow):
 async def run_strategies(candle: CandleRow):
 
 
-    # Hae data tältä sisääntulleelta kynttilältä
-    last_8_rows = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
-
     # Prepare a list of coroutines to run
     tasks = []
 
     # Thresholds — adjust to your logic
     if candle.relatR > 0 and candle.rvol >= 1.5: # ei ole riittävän in play jos Rvol jää tämän alapuolelle
+            # Hae data tältä sisääntulleelta kynttilältä
+        last_8_rows = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
         tasks.append(reversal_strategy(last_8_rows, candle))
 
     if candle.relatR < 0 and candle.rvol >= 1.5:
+            # Hae data tältä sisääntulleelta kynttilältä
+        last_8_rows = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
         tasks.append(reversal_short_strategy(last_8_rows, candle))
 
     if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]:
@@ -195,16 +196,3 @@ async def run_strategies(candle: CandleRow):
     # Run all selected strategies concurrently
     if tasks:
         await asyncio.gather(*tasks)
-
-
-
-
-    # """Run all trading strategies on the finalized candle."""
-    # await asyncio.gather(reversal_strategy(past_Dataset, candle),
-    #                      reversal_short_strategy(past_Dataset,candle),
-    #                     # vwapcontinuation_strategies(past_Dataset, candle),
-    #                     # extreme_extension(candle),
-                         
-    #                      euforia_exit_strategy(candle),
-    #                      endofday_exit_strategy(candle)
-    #                      )
