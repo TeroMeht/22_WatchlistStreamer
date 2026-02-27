@@ -42,10 +42,18 @@ async def run_streamer():
     tickers = [s[0] if isinstance(s, tuple) else s for s in symbols]
     time_zone = CLIENT_CONFIG["timezone"]
 
-    # IB data fetching functions
-    intraday_results = await asyncio.gather(*[fetch_intraday_history(ib, ticker, time_zone) for ticker in tickers])
-    daily_results_with_atr = await asyncio.gather(*[fetch_history_daily(ib, ticker) for ticker in tickers])
-    avg_volume_results_5d = await asyncio.gather(*[fetch_intraday_volume_history(ib, ticker, time_zone) for ticker in tickers])
+    tasks = []
+    for ticker in tickers:
+        tasks.append(fetch_intraday_history(ib, ticker, time_zone))
+        tasks.append(fetch_history_daily(ib, ticker))
+        tasks.append(fetch_intraday_volume_history(ib, ticker, time_zone))
+
+    results = await asyncio.gather(*tasks)
+    # Then split results back into intraday, daily, volume
+    intraday_results = results[0::3]
+    daily_results_with_atr = results[1::3]
+    avg_volume_results_5d = results[2::3]
+
 
 
     # --- validate each and combine found tickers ---
@@ -63,11 +71,16 @@ async def run_streamer():
         ib.disconnect()
         return
 
-    # --- Filter datasets to only include valid tickers ---
-    intraday_results = [df for df in intraday_results if df is not None and not df.empty and df['Symbol'].iloc[0] in valid_tickers]
-    daily_results_with_atr = [df for df in daily_results_with_atr if df is not None and not df.empty and df['Symbol'].iloc[0] in valid_tickers]
-    avg_volume_results_5d = [df for df in avg_volume_results_5d if df is not None and not df.empty and df['Symbol'].iloc[0] in valid_tickers]
+    valid_results = {
+        "intraday": [],
+        "daily": [],
+        "volume": []
+    }
 
+    for df_list, key in zip([intraday_results, daily_results_with_atr, avg_volume_results_5d], ["intraday", "daily", "volume"]):
+        for df in df_list:
+            if df is not None and not df.empty and df['Symbol'].iloc[0] in valid_tickers:
+                valid_results[key].append(df)
 
     
     rvol_dataset = handle_intraday_rvol_dataset(intraday_results,avg_volume_results_5d)
