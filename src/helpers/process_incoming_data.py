@@ -14,7 +14,7 @@ from .ibclient import *
 from src.strategies import *
 from zoneinfo import ZoneInfo
 # these codes deal with incoming data and run strategies
-
+from config import CLIENT_CONFIG
 
 
 
@@ -50,10 +50,10 @@ async def finalize_candle(last_candle,
                           price):
     """Finalize previous candle, enqueue DB write, and run strategy checks."""
 
-    # 1️⃣ Update close price
+    # 1️ Update close price
     last_candle['close'] = price
 
-    # 2️⃣ Build CandleRow with known values
+    # 2️ Build CandleRow with known values
     last_candle = CandleRow(symbol=symbol,
                             date=last_candle["minute_dt"].date(),
                             time=last_candle["minute_dt"].time(),
@@ -71,20 +71,14 @@ async def finalize_candle(last_candle,
     # calculations
     last_candle = await handle_incoming_candle(last_candle, atr_value)
     
-
-
-
     db_ready_candle = enforce_candle_row_types(last_candle)  # Ensure all floats
-
 
     await insert_candlestick_row(db_ready_candle)
     await run_strategies(last_candle)
 
 
 
-async def process_bar(bar_buffer: BarBuffer,
-                      store: CandleStore,
-                      project_config: dict,
+async def process_bar(store: CandleStore,
                       atr_value: float,
                       symbol: str,
                       bar: RealTimeBar):
@@ -93,22 +87,12 @@ async def process_bar(bar_buffer: BarBuffer,
     """
     # --- Convert time to configured timezone here ---
 
-    bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(project_config["timezone"]))
+    bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(CLIENT_CONFIG["timezone"]))
     interval_time = get_2min_interval(bar_time_local)
     last_candle = store.get_last(symbol)
 
     logging.debug(f"New 5-sec bar for {symbol} at {bar_time_local.strftime('%H:%M:%S %Z')}: "
     f"Last= {bar.close}, Volume= {bar.volume}")
-    # prepare bar dict
-    bar_data = {
-        "symbol": symbol,
-        "time": bar_time_local,
-        "last": bar.close,
-        "volume": bar.volume
-    }
-
-    # # add to buffer; will auto-flush when batch_size reached
-   # await bar_buffer.add(bar_data, insert_bulk_livestream)
 
     if not store.seen_minute(symbol, interval_time):
         store.add_minute(symbol, interval_time)

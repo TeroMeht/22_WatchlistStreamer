@@ -9,39 +9,10 @@ from .handle_dataframes import *
 
 
 
+
 logger = logging.getLogger(__name__)  # module-specific logger
 
 # Tänne tulee IB:n kanssa asioivat koodit
-
-
-# Fetch last ask price in order to calculate position size with my risk
-async def get_last_ask_price(ib: IB, symbol: str, exchange: str = "SMART", currency: str = "USD", wait_time: float = 0.5) -> float:
-    """
-    Async function to get the last ask price from IB.
-    If ask price is -1 or None, returns the last close price instead.
-    """
-    # Qualify contract asynchronously
-    contract = Stock(symbol=symbol, exchange=exchange, currency=currency)
-    await ib.qualifyContractsAsync(contract)
-
-    # Request market data
-    ticker = ib.reqMktData(contract, "", False, False)
-
-    # Wait asynchronously instead of ib.sleep
-    await asyncio.sleep(wait_time)
-
-    ask_price = ticker.ask
-
-    if ask_price is None or ask_price == -1:
-        # fallback to last close price
-        last_close = ticker.close
-        if last_close is None:
-            raise ValueError(f"No valid ask or close price available for {symbol}")
-        logging.info(f"Ask price unavailable, using last close for {symbol}: {last_close}")
-        return last_close
-
-    logging.info(f"Last ask price for {symbol}: {ask_price}")
-    return ask_price
 
 # Fetch history for ATR calculation
 async def fetch_history_daily(ib: IB, symbol: str):
@@ -68,33 +39,10 @@ async def fetch_history_daily(ib: IB, symbol: str):
     atr_df = handle_incoming_dataframe_daily(bars, symbol)
     return atr_df
 
-# --- Historical fetch ---
-async def fetch_intraday_history(ib: IB, symbol: str, time_zone: str):
-    logging.info(f"Requesting intraday data for {symbol}")
 
-    contract = Stock(symbol, "SMART", "USD")
-    await ib.qualifyContractsAsync(contract)
-
-    bars = await ib.reqHistoricalDataAsync(
-        contract,
-        endDateTime="",
-        durationStr="1 D",
-        barSizeSetting="2 mins",
-        whatToShow="TRADES",
-        useRTH=False
-    )
-
-    if not bars:
-        logging.warning(f"No historical data returned for {symbol}")
-        return None
-    
-    # Process bars directly using the intraday handler
-    processed_df = handle_incoming_dataframe_intraday(bars, symbol,time_zone)
-
-    return processed_df
         
 # --- Historical fetch for Rvol calculation ---
-async def fetch_intraday_volume_history(ib: IB, symbol: str, time_zone: str):
+async def fetch_intraday_volume_history(ib: IB, symbol: str):
     logging.info(f"Requesting Rvol data for {symbol}")
 
     contract = Stock(symbol, "SMART", "USD")
@@ -112,17 +60,14 @@ async def fetch_intraday_volume_history(ib: IB, symbol: str, time_zone: str):
     if not bars:
         logging.warning(f"No 5-day historical data returned for {symbol}")
         return None
-    
+
     # Process bars directly using the intraday handler
-    processed_df = handle_incoming_dataframe_intradays_volume(bars, symbol,time_zone)
+    today_df, past_df = handle_incoming_dataframe_intradays_volume(bars, symbol)
 
-    return processed_df
-
+    return today_df,past_df
 
 # --- Real-time monitoring loop ---
-async def monitor_tickers(  bar_buffer,
-                            candle_store,
-                            project_config,
+async def monitor_tickers( candle_store,
                             atr,
                             ib: IB, 
                             symbol: str):
@@ -138,16 +83,11 @@ async def monitor_tickers(  bar_buffer,
     async def on_bar(bars: list[RealTimeBar], hasNewBar: bool):
             if hasNewBar and bars:
                 bar = bars[-1]
-
-
-                await process_bar(bar_buffer,
-                                candle_store,
-                                project_config,
+                await process_bar(candle_store,
                                 atr,
                                 symbol, 
                                 bar) 
  
-                
     ticker.updateEvent += on_bar # tarkoittaa että kun uusi bar tulee sisään kutsu tätä funktiota
 
     # keep this coroutine alive indefinitely

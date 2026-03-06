@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 from typing import Optional, List,Dict
 from src.database.db_functions import *
-import numpy as np
+from config import CLIENT_CONFIG
 
 # Tämä on erillinen koodikirjasto jolla käsittelen sisään tulevia bars dataa pandas dataframeiksi
 logger = logging.getLogger(__name__)  # module-specific logger
@@ -50,14 +50,12 @@ def incoming_bars_to_datamodel_format(bars) -> List[IncomingBar]:
 
     return incoming_bars
 
-
-
-def intraday_datapipe(bars: List[IncomingBar], time_zone:str) -> pd.DataFrame:
+def intraday_datapipe(bars: List[IncomingBar]) -> pd.DataFrame:
     """
     Convert a list of IncomingBar dataclasses to a pandas DataFrame.
     Keeps datetime as timezone-aware and capitalizes all column names.
     """
-
+    time_zone = CLIENT_CONFIG["timezone"]
     # Convert dataclasses to DataFrame
     df = pd.DataFrame([asdict(bar) for bar in bars])
 
@@ -95,30 +93,7 @@ def daily_datapipe(bars: List[IncomingBar]) -> pd.DataFrame:
     return df
 
 
-def handle_incoming_dataframe_intraday(bars: List[IncomingBar], symbol:str, time_zone:str)-> pd.DataFrame:
-    """
-    Process IBKR bars into a pandas DataFrame (or dataclasses if needed):
-    - Adjust timezone
-    - Calculate VWAP / EMA9
-    """
-    # Step 1: Convert to dataclasses
-    incoming_bars = incoming_bars_to_datamodel_format(bars)
 
-    # Step 2: Convert to DataFrame
-    df = intraday_datapipe(incoming_bars,time_zone)
-
-    # Step 4: Assign symbol
-    df["Symbol"] = symbol
-
-    # Step 5: Calculate indicators
-    df = calculate_vwap(df)
-    df = calculate_ema(df, period=9)
-    # --- Reorder columns ---
-    desired_order = [
-        "Symbol","Date", "Time","Open", "High", "Low", "Close", "Volume","VWAP", "EMA9"
-    ]
-    df = df[desired_order]
-    return df
 
 def handle_incoming_dataframe_daily(bars: List[IncomingBar], symbol:str)-> pd.DataFrame:
 
@@ -144,58 +119,50 @@ def handle_incoming_dataframe_daily(bars: List[IncomingBar], symbol:str)-> pd.Da
 
     return df
 
-def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:str, time_zone:str)-> pd.DataFrame:
+def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:str)-> pd.DataFrame:
 
     # Step 1: Convert to dataclasses
     incoming_bars = incoming_bars_to_datamodel_format(bars)
 
     # Step 2: Convert to DataFrame
-    df = intraday_datapipe(incoming_bars,time_zone)
+    df = intraday_datapipe(incoming_bars)
 
     # Step 4: Assign symbol
     df["Symbol"] = symbol
+            # Step 4: Ensure Date column is datetime
+    df["Date"] = pd.to_datetime(df["Date"]).dt.date
 
-    # --- Reorder columns ---
-    desired_order = [
-        "Symbol","Date","Time", "Open", "High", "Low", "Close", "Volume"]
-    
-    df = df[desired_order]
+    # Step 5: Split today vs past
+    today = date.today()
+
+    df_today = df[df["Date"] == today].copy()
+    df_past = df[df["Date"] != today].copy()
+    # Keep only rows with time >= 11:00
+    df_today = df_today[df_today["Time"] >= time(11, 0)]
+
+
+    df_past = df_past[["Symbol","Date","Time","Open","High","Low","Close","Volume"]]
+
     # Step 5: Calculate average volume model
-    df = calculate_avg_volume_model([df])
+    df_past = calculate_avg_volume_model([df_past])
+    df_today = calculate_vwap(df_today)
+    df_today = calculate_ema(df_today, period=9)
 
-    return df
+    df_today = df_today[[
+        "Symbol","Date","Time","Open","High","Low","Close","Volume","VWAP","EMA9"
+    ]]
+    return df_today,df_past
 
 
 
 def build_last_atr_dict(daily_results_with_atr: List[pd.DataFrame]) -> Dict[str, float]:
-    """
-    Build a dictionary mapping each symbol to its last ATR value from daily DataFrames.
-    
-    Assumes each DataFrame contains columns 'Symbol' and 'ATR', and has only one symbol per DataFrame.
-    """
     return {df['Symbol'].iloc[0]: df['ATR'].iloc[-1] for df in daily_results_with_atr}
 
 def handle_Atr_intraday_dataset(
     intraday_results: dict[str, pd.DataFrame],
     daily_results_with_atr: list[pd.DataFrame]
 ) -> tuple[dict[str, pd.DataFrame], dict[str, float]]:
-    """
-    Build intraday datasets including existing RVOL and calculated Relatr.
 
-    Parameters
-    ----------
-    intraday_results : dict
-        Dictionary keyed by symbol containing intraday DataFrames (with RVOL already).
-    daily_results_with_atr : list[pd.DataFrame]
-        Daily ATR results to build last ATR per symbol.
-
-    Returns
-    -------
-    relatr_datasets : dict
-        Dictionary keyed by symbol containing intraday DataFrames with Relatr added.
-    last_atr_per_symbol : dict
-        Dictionary of last ATR value per symbol.
-    """
     relatr_datasets = {}
 
     # Build last ATR dictionary

@@ -5,8 +5,8 @@ from datetime import time
 CLIENT_CONFIG = {
     "clientId": 0,
     "host": str("127.0.0.1"),
-    "port2": 4002,
-    "port": 7497,
+    "port": 4002,
+    "port2": 7497,
     "capitulation_threshold": 0.45,
     "vwap_distance": 0.1,
     "extreme_extension_threshold": 2,

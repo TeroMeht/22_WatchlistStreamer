@@ -6,8 +6,8 @@ from src.common.read_configs_in import (
 )
 from src.dependencies import *
 from src.streamer.datastreamer import run_streamer
-
-
+from config import CLIENT_CONFIG
+from ib_async import IB
 
 
 # 1️⃣ Setup logging first
@@ -15,11 +15,12 @@ setup_logging()
 
 
 async def main() -> None:
-    """
-    Main entry: loads configuration, initializes dependencies,
-    and triggers the live streamer.
-    """
 
+    ib = IB()
+    await ib.connectAsync(CLIENT_CONFIG["host"],
+                          CLIENT_CONFIG["port"],
+                          CLIENT_CONFIG["clientId"])
+    
     # Load configuration files
     database_config = read_database_config(
         filename="database.ini",
@@ -28,16 +29,15 @@ async def main() -> None:
 
     #  Initialize global DB pool (ONCE)
     await init_db_pool(database_config)
-    
 
     try:
         # Run main streamer logic
-        await run_streamer()
+        await run_streamer(ib)
 
     finally:
         # Always close pool on shutdown
         await close_db_pool()
-
+        ib.disconnect()
 
 # --- Script execution ---
 if __name__ == "__main__":
