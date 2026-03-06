@@ -146,7 +146,7 @@ async def create_and_fill_avg_volume_tables_async(df_list: list[pd.DataFrame]):
         conn = await pool.acquire()
 
         for df in df_list:
-            if df.empty:
+            if df is None or df.empty:
                 continue
 
             table_name = f"{df['Symbol'].iloc[0].lower()}_volume_model"
