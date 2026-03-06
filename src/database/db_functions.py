@@ -41,19 +41,22 @@ async def delete_all_tables_db_async() -> None:
             # Disable foreign key checks
             await conn.execute("SET session_replication_role = replica;")
 
-            protected_tables = {"alarms", "livedata", "orders","exit_requests"}
-
-            for record in tables:
-                table_name = record["tablename"]
-
-                if table_name in protected_tables:
-                    logger.info(f"Skipping table: {table_name}")
-                    continue
-
-                await conn.execute(
-                    f'DROP TABLE IF EXISTS "{table_name}" CASCADE;'
-                )
-                logger.info(f"Dropped table: {table_name}")
+            # Drop tables containing _livestream or _volume_model
+            await conn.execute("""
+                DO $$
+                DECLARE
+                    t RECORD;
+                BEGIN
+                    FOR t IN
+                        SELECT tablename
+                        FROM pg_tables
+                        WHERE schemaname = 'public'
+                        AND (tablename LIKE '%_livestream%' OR tablename LIKE '%_volume_model%')
+                    LOOP
+                        EXECUTE format('DROP TABLE IF EXISTS "%I" CASCADE;', t.tablename);
+                    END LOOP;
+                END $$;
+            """)
 
             # Re-enable foreign key checks
             await conn.execute("SET session_replication_role = DEFAULT;")
