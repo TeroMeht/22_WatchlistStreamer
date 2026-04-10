@@ -22,14 +22,7 @@ async def euforia_exit_strategy(candle: CandleRow):
         fastapi_url=CLIENT_CONFIG["exit-request_endpoint"]
     )
 
-async def capitulation_exit_strategy(candle: CandleRow):
 
-    logger.info("Running Capitulation Exit for short symbol: %s", candle.symbol)
-    await send_exit_request_to_fastapi(
-        candle=candle,
-        alarm_name="capitulation",
-        fastapi_url=CLIENT_CONFIG["exit-request_endpoint"]
-)
 
 async def endofday_exit_strategy(candle: CandleRow):
     logger.info("Running End of Day Exit for symbol: %s", candle.symbol)
@@ -143,23 +136,23 @@ async def vwapcontinuation_strategies(past_dataSet:pd.DataFrame, candle: CandleR
     else:
         logger.debug("Average Relatr is neutral for symbol: %s, not near VWAP.", candle.symbol)
 
-async def extreme_extension(candle: CandleRow):
+async def downside_extension(candle: CandleRow):
 
     # Tää ei tarvi historia dataa koska tarkastetaan vain sisään tulleen candle:n relatr arvoa
     # downside alarm 
-    if candle.relatR >= CLIENT_CONFIG["extreme_extension_threshold"]: #suurempi tai yhtä suuri kuin 1 tarkoittaa downsidea
+    if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]: 
         logger.info(f"Extreme Extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
         await generate_signal_alarm(candle=candle,
-                                    signal_name= "Extreme Extension to downside",                                 
+                                    signal_name= "Extesion the dowside",                                 
                                     project_config=CLIENT_CONFIG)
-   # upside alarm
-    elif candle.relatR <= -CLIENT_CONFIG["extreme_extension_threshold"]:
-        logger.info(f"Extreme Extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
+#    # upside alarm
+#     elif candle.relatR <= -CLIENT_CONFIG["extreme_extension_threshold"]:
+#         logger.info(f"Extreme Extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
-        await generate_signal_alarm(candle=candle,
-                                    signal_name= "Extreme Extension to upside",
-                                    project_config=CLIENT_CONFIG)
+#         await generate_signal_alarm(candle=candle,
+#                                     signal_name= "Extreme Extension to upside",
+#                                     project_config=CLIENT_CONFIG)
     else:
         pass
 
@@ -184,8 +177,11 @@ async def run_strategies(candle: CandleRow):
         last_8_rows = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
         tasks.append(reversal_short_strategy(last_8_rows, candle))
 
-    if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]:
-        tasks.append(capitulation_exit_strategy(candle))
+    # if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]:
+    #     tasks.append(capitulation_exit_strategy(candle))
+
+    if candle.relatR < 0 and candle.rvol >= 1.5: 
+        tasks.append(downside_extension(candle))
 
     if candle.relatR <= -CLIENT_CONFIG["capitulation_threshold"]:
         tasks.append(euforia_exit_strategy(candle))
