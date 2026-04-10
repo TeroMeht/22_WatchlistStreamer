@@ -31,7 +31,7 @@ async def fetch_history_daily(ib: IB, symbol: str):
                                             whatToShow="TRADES",
                                             useRTH=True                 # only regular trading hours
                                         )
-
+    await asyncio.sleep(1)
     if not bars:
         logging.warning(f"No historical data returned for {symbol}")
         return None
@@ -56,7 +56,7 @@ async def fetch_intraday_volume_history(ib: IB, symbol: str):
         whatToShow="TRADES",
         useRTH=False
     )
-
+    await asyncio.sleep(1)
     if not bars:
         logging.warning(f"No 5-day historical data returned for {symbol}")
         return None
