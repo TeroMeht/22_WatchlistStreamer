@@ -56,7 +56,7 @@ async def reversal_strategy(last_8_rows:pd.DataFrame, candle: CandleRow):
             # Generate signal alarm with stop level
             await generate_signal_alarm(
                 candle=candle,
-                signal_name="EMA9 crossover up",
+                signal_name="Look for Reversal long entry - EMA9 crossover up",
                 stop_level=stop_level,
                 project_config=CLIENT_CONFIG
             )
@@ -84,80 +84,73 @@ async def reversal_short_strategy(last_8_rows:pd.DataFrame, candle: CandleRow):
             # Generate signal alarm with stop level
             await generate_signal_alarm(
                 candle=candle,
-                signal_name="EMA9 crossover down",
+                signal_name="Look for Reversal short entry - EMA9 crossover down",
                 stop_level=stop_level,
                 project_config=CLIENT_CONFIG
             )
 
 
 
-async def vwapcontinuation_strategies(past_dataSet:pd.DataFrame, candle: CandleRow):
+# async def vwapcontinuation_strategies(past_dataSet:pd.DataFrame, candle: CandleRow):
 
-    logger.info("Running VWAP Continuation strategies for symbol: %s", candle.symbol)
+#     logger.info("Running VWAP Continuation strategies for symbol: %s", candle.symbol)
 
-    if is_vwap_close(candle, CLIENT_CONFIG["vwap_distance"]): # Jos hinta on lähellä VWAP niin tarkasta mistä se on tullut
+#     if is_vwap_close(candle, CLIENT_CONFIG["vwap_distance"]): # Jos hinta on lähellä VWAP niin tarkasta mistä se on tullut
 
-        # Check VWAP closeness first (latest row)
-        df_all = past_dataSet
-        # Tarvii tarkastaa että onhan hinta ollut viimeaikoina VWAP yläpuolella
-        last_5 = df_all.tail(5)
-        avg_relatr = last_5["Relatr"].mean() # lasketaan viimeisimpien 5 candlejen relatr keskiarvo. Tämän etumerkin perusteella päätellään missä hinta on ollut
+#         # Check VWAP closeness first (latest row)
+#         df_all = past_dataSet
+#         # Tarvii tarkastaa että onhan hinta ollut viimeaikoina VWAP yläpuolella
+#         last_5 = df_all.tail(5)
+#         avg_relatr = last_5["Relatr"].mean() # lasketaan viimeisimpien 5 candlejen relatr keskiarvo. Tämän etumerkin perusteella päätellään missä hinta on ollut
 
-        # Tarkoituksena käyttää samaa kannasta haettua dataa jottei sitä tarvi kysellä uudelleen
-        if avg_relatr < 0:  # jos tää on ollut pienempi kuin 0 niin on oltu VWAP yläpuolella
-            # Log the average Relatr for debugging/visibility
-            logger.info(
-                "Price has been above VWAP recently for symbol: %s | avg Relatr of last 5 candles: %.4f",
-                candle.symbol,
-                avg_relatr
-            )
-            # Detect euforia
-            if detect_euforia(df_all, threshold=CLIENT_CONFIG["capitulation_threshold"]):
-                logger.info(f"Euforia detected earlier for symbol: {candle.symbol} now near VWAP, triggering VWAP setup alarm...")
+#         # Tarkoituksena käyttää samaa kannasta haettua dataa jottei sitä tarvi kysellä uudelleen
+#         if avg_relatr < 0:  # jos tää on ollut pienempi kuin 0 niin on oltu VWAP yläpuolella
+#             # Log the average Relatr for debugging/visibility
+#             logger.info(
+#                 "Price has been above VWAP recently for symbol: %s | avg Relatr of last 5 candles: %.4f",
+#                 candle.symbol,
+#                 avg_relatr
+#             )
+#             # Detect euforia
+#             if detect_euforia(df_all, threshold=CLIENT_CONFIG["capitulation_threshold"]):
+#                 logger.info(f"Euforia detected earlier for symbol: {candle.symbol} now near VWAP, triggering VWAP setup alarm...")
 
-                await generate_signal_alarm(candle=candle,
-                                            signal_name="VWAP continuation setup",
-                                            project_config=CLIENT_CONFIG)
+#                 await generate_signal_alarm(candle=candle,
+#                                             signal_name="VWAP continuation setup",
+#                                             project_config=CLIENT_CONFIG)
             
-        elif avg_relatr > 0: #jos tää on ollut suurempi kuin 0 niin on oltu VWAP alapuolella
-            logger.info(
-                "Price has been below VWAP recently for symbol: %s | avg Relatr of last 5 candles: %.4f",
-                candle.symbol,
-                avg_relatr
-            )
-            # Detect capitulation
-            # if detect_capitulation(df_all, threshold=project_config["capitulation_threshold"]):
-            #     logger.info(f"Capitulation detected earlier for symbol: {candle.symbol} now near VWAP, triggering VWAP setup alarm...")
+#         elif avg_relatr > 0: #jos tää on ollut suurempi kuin 0 niin on oltu VWAP alapuolella
+#             logger.info(
+#                 "Price has been below VWAP recently for symbol: %s | avg Relatr of last 5 candles: %.4f",
+#                 candle.symbol,
+#                 avg_relatr
+#             )
+#             # Detect capitulation
+#             # if detect_capitulation(df_all, threshold=project_config["capitulation_threshold"]):
+#             #     logger.info(f"Capitulation detected earlier for symbol: {candle.symbol} now near VWAP, triggering VWAP setup alarm...")
 
-            #     await generate_signal_alarm(candle=candle,
-            #                                 signal_name="VWAP continuation short setup",
-            #                                 database_config=database_config,
-            #                                 project_config=project_config)
-    else:
-        logger.debug("Average Relatr is neutral for symbol: %s, not near VWAP.", candle.symbol)
+#             #     await generate_signal_alarm(candle=candle,
+#             #                                 signal_name="VWAP continuation short setup",
+#             #                                 database_config=database_config,
+#             #                                 project_config=project_config)
+#     else:
+#         logger.debug("Average Relatr is neutral for symbol: %s, not near VWAP.", candle.symbol)
 
 async def downside_extension(candle: CandleRow):
 
-    # Tää ei tarvi historia dataa koska tarkastetaan vain sisään tulleen candle:n relatr arvoa
-    # downside alarm 
-    if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]: 
-        logger.info(f"Extreme Extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
+    logger.info(f"Extreme Extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
-        await generate_signal_alarm(candle=candle,
-                                    signal_name= "Extesion the dowside",                                 
-                                    project_config=CLIENT_CONFIG)
-#    # upside alarm
-#     elif candle.relatR <= -CLIENT_CONFIG["extreme_extension_threshold"]:
-#         logger.info(f"Extreme Extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
-
-#         await generate_signal_alarm(candle=candle,
-#                                     signal_name= "Extreme Extension to upside",
-#                                     project_config=CLIENT_CONFIG)
-    else:
-        pass
+    await generate_signal_alarm(candle=candle,
+                                signal_name= f"Extreme Extension the downside with Relatr: {candle.relatR:.3f}",                                 
+                                project_config=CLIENT_CONFIG)
 
 
+async def upside_extension(candle: CandleRow):
+    logger.info(f"Extreme Extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
+    await generate_signal_alarm(candle=candle,
+                                signal_name= f"Extreme Extension the upside with Relatr: {candle.relatR:.3f}",                                 
+                                project_config=CLIENT_CONFIG)
 
 
 async def run_strategies(candle: CandleRow):
@@ -180,8 +173,11 @@ async def run_strategies(candle: CandleRow):
     # if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]:
     #     tasks.append(capitulation_exit_strategy(candle))
 
-    if candle.relatR < 0 and candle.rvol >= 1.5: 
+    if candle.relatR >= CLIENT_CONFIG["extreme_extension_threshold"] and candle.rvol >= 3: 
         tasks.append(downside_extension(candle))
+
+    if candle.relatR <= -CLIENT_CONFIG["extreme_extension_threshold"] and candle.rvol >= 3: 
+        tasks.append(upside_extension(candle))
 
     if candle.relatR <= -CLIENT_CONFIG["capitulation_threshold"]:
         tasks.append(euforia_exit_strategy(candle))
