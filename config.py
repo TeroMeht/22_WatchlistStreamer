@@ -9,7 +9,7 @@ CLIENT_CONFIG = {
     "port": 7497,
     "capitulation_threshold": 0.45,
     "vwap_distance": 0.1,
-    "extreme_extension_threshold": 2,
+    "extreme_extension_threshold": 3,
     "BOT_TOKEN": "7824990107:AAFwXNYNgjSC3VP8jFzbcE16_Hp19qmQx-4",
     "CHAT_ID": "7892660893",
     "tickers_folder": str(Path("./tickers")),

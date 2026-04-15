@@ -1,7 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
-import logging
-from typing import Optional, List,Dict
+
 
 def get_2min_interval(dt: datetime) -> datetime:
     """Round datetime down to nearest 2-minute interval."""
@@ -12,7 +11,7 @@ def get_2min_interval(dt: datetime) -> datetime:
 
 
 
-def detect_stoplevel(df: pd.DataFrame, direction: str, offset: float = 0.06) -> float:
+def detect_stoplevel(df: pd.DataFrame, direction: str, offset: float = 0.10) -> float:
     """
     Calculate stop level based on recent High/Low in DataFrame.
 
@@ -20,7 +19,7 @@ def detect_stoplevel(df: pd.DataFrame, direction: str, offset: float = 0.06) -> 
     :param direction: 'long' or 'short'
         - 'long' -> stop below recent low
         - 'short' -> stop above recent high
-    :param offset: distance from reference price (default 0.02)
+    :param offset: distance from reference price (default 0.10)
     :return: stop level price
     """
 
