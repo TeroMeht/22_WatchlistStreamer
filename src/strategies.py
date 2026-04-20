@@ -56,7 +56,7 @@ async def reversal_strategy(last_8_rows:pd.DataFrame, candle: CandleRow):
             # Generate signal alarm with stop level
             await generate_signal_alarm(
                 candle=candle,
-                signal_name="Look for Reversal long entry - EMA9 crossover up",
+                signal_name="EMA9 crossover up",
                 stop_level=stop_level,
                 project_config=CLIENT_CONFIG
             )
@@ -84,7 +84,7 @@ async def reversal_short_strategy(last_8_rows:pd.DataFrame, candle: CandleRow):
             # Generate signal alarm with stop level
             await generate_signal_alarm(
                 candle=candle,
-                signal_name="Look for Reversal short entry - EMA9 crossover down",
+                signal_name="EMA9 crossover down",
                 stop_level=stop_level,
                 project_config=CLIENT_CONFIG
             )
@@ -173,11 +173,11 @@ async def run_strategies(candle: CandleRow):
     # if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]:
     #     tasks.append(capitulation_exit_strategy(candle))
 
-    if candle.relatR >= CLIENT_CONFIG["extreme_extension_threshold"] and candle.rvol >= 3: 
-        tasks.append(downside_extension(candle))
+    # if candle.relatR >= CLIENT_CONFIG["extreme_extension_threshold"] and candle.rvol >= 3: 
+    #     tasks.append(downside_extension(candle))
 
-    if candle.relatR <= -CLIENT_CONFIG["extreme_extension_threshold"] and candle.rvol >= 3: 
-        tasks.append(upside_extension(candle))
+    # if candle.relatR <= -CLIENT_CONFIG["extreme_extension_threshold"] and candle.rvol >= 3: 
+    #     tasks.append(upside_extension(candle))
 
     if candle.relatR <= -CLIENT_CONFIG["capitulation_threshold"]:
         tasks.append(euforia_exit_strategy(candle))
