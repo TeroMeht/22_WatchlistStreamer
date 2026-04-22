@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)  # module-specific logger
 # Generate alarm message and insert
 async def generate_signal_alarm(candle: CandleRow,
                                 signal_name: str,
-                                stop_level:float,
+                                stop_level:float|None,
                                 project_config: dict)-> None:
     """
     Builds and sends an EMA9 crossover alarm if no recent duplicate exists.
@@ -31,6 +31,8 @@ async def generate_signal_alarm(candle: CandleRow,
             await insert_alarm(candle=candle,
                                 alarm_message=signal_name)
             
+            if stop_level is not None:
+                logger.info(f"Stop level for {candle.symbol} set at {stop_level}")
             # Insert active order to DB
             await insert_order(candle=candle,
                                stop_level=stop_level)
