@@ -138,18 +138,20 @@ async def reversal_short_strategy(last_8_rows:pd.DataFrame, candle: CandleRow):
 
 async def downside_extension(candle: CandleRow):
 
-    logger.info(f"Extreme Extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
+    logger.info(f"Capitulation alarm: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
     await generate_signal_alarm(candle=candle,
-                                signal_name= f"Extreme Extension the downside with Relatr: {candle.relatR:.3f}",                                 
+                                signal_name= f"Capitulation the downside with Relatr: {candle.relatR:.3f}",
+                                stop_level=None, # No stop level for this strategy                                 
                                 project_config=CLIENT_CONFIG)
 
 
 async def upside_extension(candle: CandleRow):
-    logger.info(f"Extreme Extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
+    logger.info(f"Euforic extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
     await generate_signal_alarm(candle=candle,
-                                signal_name= f"Extreme Extension the upside with Relatr: {candle.relatR:.3f}",                                 
+                                signal_name= f"Euforic extension the upside with Relatr: {candle.relatR:.3f}",
+                                stop_level=None,                                 
                                 project_config=CLIENT_CONFIG)
 
 
@@ -160,24 +162,24 @@ async def run_strategies(candle: CandleRow):
     tasks = []
 
     # Thresholds — adjust to your logic
-    if candle.relatR > 0 and candle.rvol >= 1.5: # ei ole riittävän in play jos Rvol jää tämän alapuolelle
-            # Hae data tältä sisääntulleelta kynttilältä
-        last_8_rows = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
-        tasks.append(reversal_strategy(last_8_rows, candle))
+    # if candle.relatR > 0 and candle.rvol >= 1.5: # ei ole riittävän in play jos Rvol jää tämän alapuolelle
+    #         # Hae data tältä sisääntulleelta kynttilältä
+    #     last_8_rows = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
+    #     tasks.append(reversal_strategy(last_8_rows, candle))
 
-    if candle.relatR < 0 and candle.rvol >= 1.5:
-            # Hae data tältä sisääntulleelta kynttilältä
-        last_8_rows = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
-        tasks.append(reversal_short_strategy(last_8_rows, candle))
+    # if candle.relatR < 0 and candle.rvol >= 1.5:
+    #         # Hae data tältä sisääntulleelta kynttilältä
+    #     last_8_rows = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
+    #     tasks.append(reversal_short_strategy(last_8_rows, candle))
 
     # if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]:
     #     tasks.append(capitulation_exit_strategy(candle))
 
-    # if candle.relatR >= CLIENT_CONFIG["extreme_extension_threshold"] and candle.rvol >= 3: 
-    #     tasks.append(downside_extension(candle))
+    if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"] and candle.rvol >= 1.5: 
+        tasks.append(downside_extension(candle))
 
-    # if candle.relatR <= -CLIENT_CONFIG["extreme_extension_threshold"] and candle.rvol >= 3: 
-    #     tasks.append(upside_extension(candle))
+    if candle.relatR <= -CLIENT_CONFIG["capitulation_threshold"] and candle.rvol >= 1.5: 
+         tasks.append(upside_extension(candle))
 
     if candle.relatR <= -CLIENT_CONFIG["capitulation_threshold"]:
         tasks.append(euforia_exit_strategy(candle))
