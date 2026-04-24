@@ -1,8 +1,12 @@
-import requests
+import httpx
 
 import logging
 
 logger = logging.getLogger(__name__)  # module-specific logger
+
+
+# Default timeout for Telegram HTTP calls (seconds)
+_TELEGRAM_TIMEOUT = 10.0
 
 
 
@@ -10,7 +14,7 @@ logger = logging.getLogger(__name__)  # module-specific logger
 def format_telegram_message(symbol, time_obj, alarm_message):
 
     message = (
-        f"🚨 Alarm triggered 🚨\n"
+        f"\U0001F6A8 Alarm triggered \U0001F6A8\n"
         f"Symbol: {symbol}\n"
         f"Time: {time_obj}\n"
         f"Message: {alarm_message}"
@@ -29,8 +33,9 @@ def safe_print(*args, **kwargs):
 
 async def send_telegram_message(symbol, time_obj, alarm_message, bot_token, chat_id):
     """
-    Send a formatted Telegram message.
-    This function now handles formatting internally.
+    Send a formatted Telegram message asynchronously.
+    Uses httpx.AsyncClient so the event loop is not blocked while
+    waiting for the Telegram API response.
     """
     message = format_telegram_message(symbol, time_obj, alarm_message)
 
@@ -42,7 +47,8 @@ async def send_telegram_message(symbol, time_obj, alarm_message, bot_token, chat
     }
 
     try:
-        response = requests.post(url, data=payload)
+        async with httpx.AsyncClient(timeout=_TELEGRAM_TIMEOUT) as client:
+            response = await client.post(url, data=payload)
         result = response.json()
         if result.get("ok"):
             safe_print(f"Telegram message sent successfully: {result}")
@@ -50,29 +56,31 @@ async def send_telegram_message(symbol, time_obj, alarm_message, bot_token, chat
             safe_print(f"Telegram API error: {result}")
         return result
     except Exception as e:
-        safe_print(f"Error sending Telegram message: {e}, raw response: {response.text}")
+        safe_print(f"Error sending Telegram message: {e}")
         return {"ok": False, "error": str(e)}
-    
 
 
 
 
-async def send_telegram_picture(project_config: dict, image_bytes, alarm_message:str)-> dict:
+async def send_telegram_picture(project_config: dict, image_bytes, alarm_message: str) -> dict:
     """
     Send a picture to a Telegram chat from a byte object (in-memory image),
-    with optional caption text.
-    
-    :param bot_token: Telegram bot token
-    :param chat_id: Chat ID where the image will be sent
+    with optional caption text. Non-blocking: uses httpx.AsyncClient so other
+    async tasks (e.g. real-time bar processing) keep running while the upload
+    is in flight.
+
+    :param project_config: dict containing BOT_TOKEN and CHAT_ID
     :param image_bytes: Image in byte format
-    :param caption: Optional text caption to send with the image
+    :param alarm_message: Optional text caption to send with the image
     """
-    telegram_endpoint = f"https://api.telegram.org/bot{project_config["BOT_TOKEN"]}/sendPhoto"
-    
+    bot_token = project_config["BOT_TOKEN"]
+    chat_id = project_config["CHAT_ID"]
+    telegram_endpoint = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+
     try:
         # Prepare the payload for the request
         image_payload = {
-            "chat_id": project_config["CHAT_ID"],
+            "chat_id": chat_id,
             "caption": alarm_message  # Add caption if provided
         }
 
@@ -81,8 +89,9 @@ async def send_telegram_picture(project_config: dict, image_bytes, alarm_message
             'photo': ('image.png', image_bytes, 'image/png')
         }
 
-        # Send the request
-        response = requests.post(telegram_endpoint, data=image_payload, files=files)
+        # Send the request asynchronously (does not block the event loop)
+        async with httpx.AsyncClient(timeout=_TELEGRAM_TIMEOUT) as client:
+            response = await client.post(telegram_endpoint, data=image_payload, files=files)
         result = response.json()
 
         if result.get("ok"):

@@ -32,15 +32,17 @@ def calculate_14day_atr_df(data, period=14):
     # Previous close
     df['Prev_Close'] = df['Close'].shift(1)
 
-    # True Range (TR)
-    df['TR'] = df.apply(
-        lambda row: max(
-            row['High'] - row['Low'],
-            abs(row['High'] - row['Prev_Close']) if pd.notnull(row['Prev_Close']) else row['High'] - row['Low'],
-            abs(row['Low'] - row['Prev_Close']) if pd.notnull(row['Prev_Close']) else row['High'] - row['Low']
-        ),
-        axis=1
-    )
+    # True Range (TR) -- vectorized.
+    # Semantics identical to the previous row-wise df.apply() implementation:
+    # when Prev_Close is NaN (first row), the High-Prev_Close and
+    # Low-Prev_Close components fall back to (High - Low). We reproduce this
+    # by filling NaN values in the shifted reference with the current High
+    # for the H-PC term and the current Low for the L-PC term, which makes
+    # both absolute differences collapse to (High - Low) for that row.
+    hl = df['High'] - df['Low']
+    h_pc = (df['High'] - df['Prev_Close'].fillna(df['High'])).abs()
+    l_pc = (df['Low'] - df['Prev_Close'].fillna(df['Low'])).abs()
+    df['TR'] = np.maximum.reduce([hl.values, h_pc.values, l_pc.values])
 
     # ATR: exponential moving average of TR (rounded to 4 decimals)
     df['ATR'] = df['TR'].ewm(span=period, adjust=False).mean().round(4)
@@ -185,25 +187,17 @@ def calculate_next_rvol(candle: CandleRow, historical_df: pd.DataFrame, avg_volu
 
 
 
-
-
-
-# Laskee positio koon kun tiedetään nämä
+# Laskee positio koon kun tiedetaan nama
 def calculate_position_size(entry_price, stop_price, risk):
 
     try:
         risk_per_unit = entry_price - stop_price
         if risk_per_unit == 0:
             raise ValueError("Entry price and stop price cannot be the same.")
-        
+
         position_size = abs(int(risk / risk_per_unit))  # force integer
         return position_size
-    
+
     except Exception as e:
         logging.error("Error calculating position size:", e)
         return None
-    
-
-
-
-

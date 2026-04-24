@@ -70,25 +70,15 @@ async def create_and_fill_table_async(df: pd.DataFrame)-> None:
 
     table_name = f"{df["Symbol"].iloc[0]}_livestream"
 
-    # Convert DataFrame to list of tuples
-    data = [
-        (
-            row["Symbol"],
-            row["Date"],
-            row["Time"],
-            row["Open"],
-            row["High"],
-            row["Low"],
-            row["Close"],
-            row["Volume"],
-            row["VWAP"],
-            row["EMA9"],
-            row["Avg_volume"],
-            row["Rvol"],
-            row["Relatr"]
-        )
-        for _, row in df.iterrows()
-    ]
+    # Convert DataFrame to list of tuples.
+    # Previously used df.iterrows(), which is notoriously slow because it
+    # rebuilds a pandas Series for every row. Selecting the desired columns
+    # and calling .itertuples(index=False, name=None) yields plain tuples
+    # via numpy buffers -- typically 5-10x faster on multi-row frames and
+    # produces tuples already in the right column order for the INSERT.
+    _cols = ["Symbol", "Date", "Time", "Open", "High", "Low", "Close",
+             "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr"]
+    data = list(df[_cols].itertuples(index=False, name=None))
 
     create_table_sql = f"""
     CREATE TABLE IF NOT EXISTS {table_name} (
@@ -108,20 +98,30 @@ async def create_and_fill_table_async(df: pd.DataFrame)-> None:
     );
     """
 
+    # Composite index on (Symbol, Date, Time) to accelerate:
+    #   - duplicate-check SELECTs in insert_candlestick_row
+    #   - ORDER BY Date, Time in get_last_rows
+    # Without this, both fall back to full table scans as the table grows.
+    create_index_sql = f"""
+    CREATE INDEX IF NOT EXISTS idx_{table_name}_sym_dt_tm
+        ON {table_name} ("Symbol", "Date", "Time");
+    """
+
     insert_sql = f"""
-    INSERT INTO {table_name} 
+    INSERT INTO {table_name}
     ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr")
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
     """
 
     conn = None
     try:
-        # 🔁 CHANGED: use global pool instead of direct connection
+        # CHANGED: use global pool instead of direct connection
         pool = get_db_pool()
         conn = await pool.acquire()
 
         async with conn.transaction():  # ensures rollback on failure
             await conn.execute(create_table_sql)
+            await conn.execute(create_index_sql)
             await conn.executemany(insert_sql, data)
 
         logging.info(
@@ -133,7 +133,7 @@ async def create_and_fill_table_async(df: pd.DataFrame)-> None:
         raise
 
     finally:
-        # 🔁 CHANGED: release connection back to pool
+        # CHANGED: release connection back to pool
         if conn:
             await pool.release(conn)
 
@@ -152,11 +152,11 @@ async def create_and_fill_avg_volume_tables_async(df_list: list[pd.DataFrame]):
             table_name = f"{df['Symbol'].iloc[0].lower()}_volume_model"
             logging.info(f"Filling average volume table: {table_name}")
 
-            # Convert DataFrame to list of tuples
-            data = [
-                (row["Symbol"], row["Time"], row["Avg_volume"])
-                for _, row in df.iterrows()
-            ]
+            # Convert DataFrame to list of tuples -- vectorized.
+            # See note on iterrows() in create_and_fill_table_async above.
+            data = list(
+                df[["Symbol", "Time", "Avg_volume"]].itertuples(index=False, name=None)
+            )
 
             create_table_sql = f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
@@ -164,6 +164,13 @@ async def create_and_fill_avg_volume_tables_async(df_list: list[pd.DataFrame]):
                 "Time" TIME NOT NULL,
                 "Avg_volume" NUMERIC(18, 2)
             );
+            """
+
+            # Index on (Symbol, Time) to accelerate fetch_avg_volume_for_candle,
+            # which is hit on every incoming candle.
+            create_index_sql = f"""
+            CREATE INDEX IF NOT EXISTS idx_{table_name}_sym_time
+                ON {table_name} ("Symbol", "Time");
             """
 
             insert_sql = f"""
@@ -174,6 +181,7 @@ async def create_and_fill_avg_volume_tables_async(df_list: list[pd.DataFrame]):
             # Use transaction for safety
             async with conn.transaction():
                 await conn.execute(create_table_sql)
+                await conn.execute(create_index_sql)
                 await conn.executemany(insert_sql, data)
 
             logging.info(f"Inserted {len(data)} rows into '{table_name}'")
@@ -183,7 +191,7 @@ async def create_and_fill_avg_volume_tables_async(df_list: list[pd.DataFrame]):
         raise
 
     finally:
-        # 🔁 CHANGED: release connection back to pool
+        # CHANGED: release connection back to pool
         if conn:
             await pool.release(conn)
 
@@ -201,7 +209,7 @@ async def insert_candlestick_row(last_candle: CandleRow):
     conn = await pool.acquire()
 
     try:
-        # Convert CandleRow → tuple for DB insertion
+        # Convert CandleRow -> tuple for DB insertion
         db_row = (
             last_candle.symbol,
             last_candle.date,
@@ -226,7 +234,7 @@ async def insert_candlestick_row(last_candle: CandleRow):
         """
         exists = await conn.fetchrow(check_sql, last_candle.symbol, last_candle.date, last_candle.time)
         if exists:
-           # logging.info(f"Skipped duplicate candle for {last_candle.symbol}: {last_candle}")
+            logging.debug(f"Skipped duplicate candle for {last_candle.symbol}: {last_candle}")
             return
 
         # --- Insert new record ---
@@ -236,13 +244,13 @@ async def insert_candlestick_row(last_candle: CandleRow):
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13);
         """
         await conn.execute(insert_sql, *db_row)
-       # logging.info(f"Inserted candle into '{symbol}': {last_candle}")
+        logging.debug(f"Inserted candle into '{symbol}': {last_candle}")
 
     except Exception as e:
         logging.exception(f" Error inserting row for {last_candle.symbol}: {e}")
 
     finally:
-        # 🔁 CHANGED: release connection back to pool
+        # CHANGED: release connection back to pool
         if conn:
             await pool.release(conn)
 
@@ -298,7 +306,7 @@ async def insert_bulk_livestream(bars: list[dict]):
         logging.exception("Error inserting bars into livedata table: %s", e)
 
     finally:
-        # 🔁 CHANGED: release connection back to pool
+        # CHANGED: release connection back to pool
         if conn:
             await pool.release(conn)
 
@@ -330,7 +338,7 @@ async def fetch_avg_volume_for_candle(candle_row: CandleRow) -> float:
         return 0.0
 
     finally:
-        # 🔁 CHANGED: release connection back to pool
+        # CHANGED: release connection back to pool
         if conn:
             await pool.release(conn)
 
@@ -371,7 +379,7 @@ async def get_last_rows(table_name:str, num_rows:int):
 
         # Convert asyncpg records to DataFrame
         df = pd.DataFrame([dict(r) for r in rows])
-                # 🔧 Convert numeric columns (which come as Decimal) to float
+                # Convert numeric columns (which come as Decimal) to float
         numeric_cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr"]
         for col in numeric_cols:
             if col in df.columns:
@@ -383,7 +391,7 @@ async def get_last_rows(table_name:str, num_rows:int):
         return pd.DataFrame()
 
     finally:
-        # 🔁 CHANGED: release connection back to pool
+        # CHANGED: release connection back to pool
         if conn:
             await pool.release(conn)
 
@@ -410,7 +418,7 @@ async def insert_alarm(candle: CandleRow, alarm_message:str):
     except Exception as e:
         logging.error("Error inserting alarm: %s", e)
     finally:
-        # 🔁 CHANGED: release connection back to pool
+        # CHANGED: release connection back to pool
         if conn:
             await pool.release(conn)
 
@@ -458,7 +466,7 @@ async def insert_order(candle: CandleRow, stop_level: float):
         logging.error("Error inserting order: %s", e)
 
     finally:
-        # 🔁 CHANGED: release connection back to pool
+        # CHANGED: release connection back to pool
         if conn:
             await pool.release(conn)
 
@@ -499,7 +507,6 @@ async def alarm_exists_recently(candle: CandleRow, alarm_message: str, cutoff_mi
         return False
 
     finally:
-        # 🔁 CHANGED: release connection back to pool
+        # CHANGED: release connection back to pool
         if conn:
             await pool.release(conn)
-
