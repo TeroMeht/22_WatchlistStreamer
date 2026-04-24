@@ -141,7 +141,7 @@ async def downside_extension(candle: CandleRow):
     logger.info(f"Capitulation alarm: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
     await generate_signal_alarm(candle=candle,
-                                signal_name= f"Capitulation the downside with Relatr: {candle.relatR:.3f}",
+                                signal_name= f"Capitulation alarm",
                                 stop_level=None, # No stop level for this strategy                                 
                                 project_config=CLIENT_CONFIG)
 
@@ -150,7 +150,7 @@ async def upside_extension(candle: CandleRow):
     logger.info(f"Euforic extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
     await generate_signal_alarm(candle=candle,
-                                signal_name= f"Euforic extension the upside with Relatr: {candle.relatR:.3f}",
+                                signal_name= f"Euforic alarm",
                                 stop_level=None,                                 
                                 project_config=CLIENT_CONFIG)
 
