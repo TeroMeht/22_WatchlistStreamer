@@ -8,6 +8,7 @@ import logging
 
 from src.helpers.utils import *
 from src.dependencies import get_db_pool
+import asyncpg
 
 
 logger = logging.getLogger(__name__)  # module-specific logger
@@ -21,9 +22,9 @@ async def delete_all_tables_db_async() -> None:
         async with pool.acquire() as conn:
             # Optional safety check (still useful)
             db_name = await conn.fetchval("SELECT current_database();")
-            if db_name not in ("livestreaming", "volumemodels"):
+            if db_name not in ("livestreaming"):
                 logger.info(
-                    f"Aborting: database is '{db_name}', not 'livestreaming' or 'volumemodels'."
+                    f"Aborting: database is '{db_name}', livestreaming'."
                 )
                 return
 
@@ -396,6 +397,24 @@ async def get_last_rows(table_name:str, num_rows:int):
             await pool.release(conn)
 
 
+
+async def create_alarms_table(db_conn: asyncpg.Connection) -> None:
+    """
+    Create the alarms table if it doesn't already exist.
+    """
+    await db_conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS alarms (
+            "Id" SERIAL PRIMARY KEY,
+            "Symbol" TEXT NOT NULL,
+            "Time" TIME WITHOUT TIME ZONE NOT NULL,
+            "Alarm" TEXT NOT NULL,
+            "Date" DATE NOT NULL
+        );
+        """
+    )
+
+
 async def insert_alarm(candle: CandleRow, alarm_message:str):
     # Get database connection from pool
     pool = get_db_pool()
@@ -423,6 +442,27 @@ async def insert_alarm(candle: CandleRow, alarm_message:str):
             await pool.release(conn)
 
 #------------------Order handling--------------------------------------------------------------
+
+
+async def create_orders_table(db_conn: asyncpg.Connection) -> None:
+    """
+    Create the orders table if it doesn't already exist.
+    """
+    await db_conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS orders (
+            "Id" SERIAL PRIMARY KEY,
+            "Symbol" TEXT NOT NULL,
+            "Time" TIME WITHOUT TIME ZONE NOT NULL,
+            "Stop" NUMERIC(10, 2) NOT NULL,
+            "Date" DATE NOT NULL,
+            "Status" TEXT NOT NULL
+        );
+        """
+    )
+
+
+
 
 async def insert_order(candle: CandleRow, stop_level: float):
     # Get database connection from pool
