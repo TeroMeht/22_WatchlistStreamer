@@ -6,6 +6,7 @@ from src.common.read_configs_in import (
 )
 from src.dependencies import *
 from src.streamer.datastreamer import run_streamer
+from src.database.db_functions import create_alarms_table, create_orders_table 
 from config import CLIENT_CONFIG
 from ib_async import IB
 
@@ -27,8 +28,16 @@ async def main() -> None:
         section="livestream",
     )
 
-    #  Initialize global DB pool (ONCE)
+    # Initialize global DB pool (ONCE)
     await init_db_pool(database_config)
+
+    # Ensure tables exist before any inserts/reads happen
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        await create_alarms_table(conn)
+        await create_orders_table(conn)
+        logging.info("Tables ensured: alarms, orders")
+
 
     try:
         # Run main streamer logic
