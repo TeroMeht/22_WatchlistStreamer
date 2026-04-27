@@ -5,7 +5,7 @@ import asyncio
 import logging
 from src.helpers.utils import *
 from src.alarms.send_postrequest import send_alarm_to_fastapi, send_exit_request_to_fastapi
-from config import CLIENT_CONFIG
+from src.core.config import CLIENT_CONFIG
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 from typing import Optional, List,Dict
 from src.database.db_functions import *
-from config import CLIENT_CONFIG
+from src.core.config import CLIENT_CONFIG
 
 # Tämä on erillinen koodikirjasto jolla käsittelen sisään tulevia bars dataa pandas dataframeiksi
 logger = logging.getLogger(__name__)  # module-specific logger

@@ -1,8 +1,14 @@
 # Virtual environment
 .venv/
 
-# Database ini
+# Environment files (kept centrally in C:/codebase/env-repo/<project>.env;
+# any local .env is treated as a stray and ignored).
+.env
+.env.*
+
+# Legacy config files (now handled by env-repo)
 database.ini
+config.py
 
 
 # Python cache files
