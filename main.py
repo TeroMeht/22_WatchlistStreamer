@@ -1,13 +1,10 @@
 import asyncio
 
 from src.common.logging_config import setup_logging
-from src.common.read_configs_in import (
-    read_database_config,
-)
 from src.dependencies import *
 from src.streamer.datastreamer import run_streamer
-from src.database.db_functions import create_alarms_table, create_orders_table 
-from config import CLIENT_CONFIG
+from src.database.db_functions import create_alarms_table, create_orders_table
+from src.core.config import settings
 from ib_async import IB
 
 
@@ -18,18 +15,14 @@ setup_logging()
 async def main() -> None:
 
     ib = IB()
-    await ib.connectAsync(CLIENT_CONFIG["host"],
-                          CLIENT_CONFIG["port"],
-                          CLIENT_CONFIG["clientId"])
-    
-    # Load configuration files
-    database_config = read_database_config(
-        filename="database.ini",
-        section="livestream",
+    await ib.connectAsync(
+        settings.IB_HOST,
+        settings.IB_PORT,
+        settings.IB_CLIENT_ID,
     )
 
-    # Initialize global DB pool (ONCE)
-    await init_db_pool(database_config)
+    # Initialize global DB pool (ONCE) using validated DB config from .env
+    await init_db_pool(settings.database_config)
 
     # Ensure tables exist before any inserts/reads happen
     pool = get_db_pool()

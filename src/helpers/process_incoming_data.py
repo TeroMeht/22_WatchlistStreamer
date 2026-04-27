@@ -14,7 +14,7 @@ from .ibclient import *
 from src.strategies import *
 from zoneinfo import ZoneInfo
 # these codes deal with incoming data and run strategies
-from config import CLIENT_CONFIG
+from src.core.config import CLIENT_CONFIG
 
 
 

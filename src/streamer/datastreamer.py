@@ -16,7 +16,7 @@ from src.helpers.ibclient import *
 from src.helpers.handle_dataframes import *
 from src.helpers.process_incoming_data import CandleStore
 from src.symbol_loader.loader import load_symbols_from_folder
-from config import CLIENT_CONFIG
+from src.core.config import CLIENT_CONFIG
 
 
 async def run_streamer(ib):
