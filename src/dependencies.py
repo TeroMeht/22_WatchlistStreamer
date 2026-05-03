@@ -2,36 +2,21 @@ import asyncpg
 import logging
 from typing import Optional
 
+from src.core.config import settings
+
 
 _db_pool: Optional[asyncpg.Pool] = None
 
 
-async def init_db_pool(database_config: dict):
+async def init_db_pool() -> asyncpg.Pool:
     """
-    Initialize the global asyncpg connection pool.
-    Call this ONCE at app startup.
+    Initialize the global DB pool (idempotent).
     """
     global _db_pool
-
-    if _db_pool is not None:
-        return _db_pool
-
-    try:
-        _db_pool = await asyncpg.create_pool(
-            user=database_config["user"],
-            password=database_config["password"],
-            database=database_config["database"],
-            host=database_config["host"],
-            port=int(database_config.get("port", 5432)),
-            min_size=1,
-            max_size=10,
-        )
+    if _db_pool is None:
+        _db_pool = await asyncpg.create_pool(dsn=settings.DATABASE_URL)
         logging.info("Database pool initialized")
-        return _db_pool
-
-    except Exception as e:
-        logging.exception("Failed to initialize DB pool: %s", e)
-        raise
+    return _db_pool
 
 
 def get_db_pool() -> asyncpg.Pool:
@@ -52,5 +37,3 @@ async def close_db_pool():
         await _db_pool.close()
         _db_pool = None
         logging.info("Database pool closed")
-
-

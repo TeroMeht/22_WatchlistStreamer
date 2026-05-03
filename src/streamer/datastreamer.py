@@ -3,10 +3,9 @@ from src.helpers.ibclient import monitor_tickers
 from src.database.db_functions import delete_all_tables_db_async
 import asyncio
 import logging
-from ib_async import IB
 
 from src.database.db_functions import *
-from src.common.read_configs_in import *
+
 
 from src.helpers.utils import *
 from src.streamer.datavalidation import *
@@ -16,7 +15,7 @@ from src.helpers.ibclient import *
 from src.helpers.handle_dataframes import *
 from src.helpers.process_incoming_data import CandleStore
 from src.symbol_loader.loader import load_symbols_from_folder
-from src.core.config import CLIENT_CONFIG
+from src.core.config import settings
 
 
 async def run_streamer(ib):
@@ -30,7 +29,7 @@ async def run_streamer(ib):
     await delete_all_tables_db_async()
 
     # Load symbols
-    symbols = load_symbols_from_folder(CLIENT_CONFIG["tickers_folder"])
+    symbols = load_symbols_from_folder(settings.TICKERS_FOLDER)
 
 
     tickers = [s[0] if isinstance(s, tuple) else s for s in symbols]
