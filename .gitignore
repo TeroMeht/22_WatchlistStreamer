@@ -8,7 +8,7 @@
 
 # Legacy config files (now handled by env-repo)
 database.ini
-config.py
+
 
 
 # Python cache files
