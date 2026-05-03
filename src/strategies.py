@@ -1,27 +1,22 @@
 from src.alarms.alarm_logics import *
 from src.alarms.alarm_generator import generate_signal_alarm
+from src.orders.order_generator import generate_entry_order, detect_stoplevel
 from src.database.db_functions import get_last_rows
 import asyncio
 import logging
-from src.helpers.utils import *
 from src.exit_strategies import *
-from src.core.config import CLIENT_CONFIG
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 
-
-
-
 async def reversal_strategy(last_8_rows:pd.DataFrame, candle: CandleRow):
 
-    logger.info("Running Reversal Long strategy for symbol: %s | RelATR: %.4f",
-    candle.symbol,
-    candle.relatR)
+    logger.info("Running Reversal Long strategy for symbol: %s | RelATR: %.4f",candle.symbol,candle.relatR)
 
     # Check for capitulation using the DataFrame
-    if detect_capitulation(last_8_rows, threshold=CLIENT_CONFIG["capitulation_threshold"]):
+    if detect_capitulation(last_8_rows, threshold=settings.CAPITULATION_THRESHOLD):
         logger.debug("Capitulation detected for symbol: %s. Checking EMA9 crossover...", candle.symbol)
         
         if is_crossover_up(last_8_rows.tail(2)):
@@ -30,26 +25,24 @@ async def reversal_strategy(last_8_rows:pd.DataFrame, candle: CandleRow):
 
             # --- Calculate stop level ---
             stop_level = detect_stoplevel(last_8_rows, direction="long")
-            logging.info(
-                f"{candle.symbol}: Stop level set at {stop_level}"
-            )
 
             # Generate signal alarm with stop level
             await generate_signal_alarm(
                 candle=candle,
-                signal_name="EMA9 crossover up",
-                stop_level=stop_level,
-                project_config=CLIENT_CONFIG
+                signal_name="EMA9 crossover up"
             )
-
+            
+            await generate_entry_order(
+                candle=candle,
+                stop_level=stop_level
+            )
+            
 async def reversal_short_strategy(last_8_rows:pd.DataFrame, candle: CandleRow):
 
-    logger.info("Running Reversal Short strategy for symbol: %s | RelATR: %.4f",
-    candle.symbol,
-    candle.relatR)
+    logger.info("Running Reversal Short strategy for symbol: %s | RelATR: %.4f",candle.symbol,candle.relatR)
 
     # Check for euforia using the DataFrame
-    if detect_euforia(last_8_rows, threshold=CLIENT_CONFIG["capitulation_threshold"]):
+    if detect_euforia(last_8_rows, threshold=settings.CAPITULATION_THRESHOLD):
         logger.debug("Euforia detected for symbol: %s. Checking EMA9 crossover...", candle.symbol)
 
         if is_crossover_down(last_8_rows.tail(2)):
@@ -58,19 +51,17 @@ async def reversal_short_strategy(last_8_rows:pd.DataFrame, candle: CandleRow):
 
             # --- Calculate stop level ---
             stop_level = detect_stoplevel(last_8_rows, direction="short")
-            logging.info(
-                f"{candle.symbol}: Stop level set at {stop_level}"
-            )
+            logging.info(f"{candle.symbol}: Stop level set at {stop_level}")
 
             # Generate signal alarm with stop level
             await generate_signal_alarm(
                 candle=candle,
-                signal_name="EMA9 crossover down",
-                stop_level=stop_level,
-                project_config=CLIENT_CONFIG
+                signal_name="EMA9 crossover down"
             )
-
-
+            await generate_entry_order(
+                candle=candle,
+                stop_level=stop_level
+            )
 
 async def vwapcontinuation_strategies(past_dataSet:pd.DataFrame, candle: CandleRow):
 
@@ -90,13 +81,11 @@ async def vwapcontinuation_strategies(past_dataSet:pd.DataFrame, candle: CandleR
             avg_relatr
         )
         # Detect euforia
-        if detect_euforia(df_all, threshold=CLIENT_CONFIG["capitulation_threshold"]):
+        if detect_euforia(df_all, threshold=settings.CAPITULATION_THRESHOLD):
             logger.info(f"Euforia detected earlier for symbol: {candle.symbol} now near VWAP, triggering VWAP setup alarm...")
             
             await generate_signal_alarm(candle=candle,
-                                        signal_name="VWAP continuation setup",
-                                        stop_level= None,
-                                        project_config=CLIENT_CONFIG)
+                                        signal_name="VWAP continuation setup")
         
 
 
@@ -106,18 +95,14 @@ async def downside_extension(candle: CandleRow):
     logger.info(f"Capitulation alarm: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
     await generate_signal_alarm(candle=candle,
-                                signal_name= f"Capitulation alarm",
-                                stop_level=None, # No stop level for this strategy                                 
-                                project_config=CLIENT_CONFIG)
-
+                                signal_name= f"Capitulation alarm")                             
 
 async def upside_extension(candle: CandleRow):
     logger.info(f"Euforic extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
 
     await generate_signal_alarm(candle=candle,
-                                signal_name= f"Euforic alarm",
-                                stop_level=None,                                 
-                                project_config=CLIENT_CONFIG)
+                                signal_name= f"Euforic alarm")
+
 
 
 async def run_strategies(candle: CandleRow):
@@ -137,11 +122,9 @@ async def run_strategies(candle: CandleRow):
         last_8_rows = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
         tasks.append(reversal_short_strategy(last_8_rows, candle))
 
-    # if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]:
-    #     tasks.append(capitulation_exit_strategy(candle))
 
     # VWAP continuation — needs recent history to evaluate where price came from
-    if is_vwap_close(candle, CLIENT_CONFIG["vwap_distance"]):
+    if is_vwap_close(candle, settings.VWAP_DISTANCE):
 
         tasks.append(vwap_exit_strategy(candle)) # Vwap exit trigger
 
@@ -150,22 +133,22 @@ async def run_strategies(candle: CandleRow):
 
 
 
-    if candle.relatR >= CLIENT_CONFIG["extreme_extension_threshold"] and candle.rvol >= 1.5: 
+    if candle.relatR >= settings.EXTREME_EXTENSION_THRESHOLD and candle.rvol >= 1.5: 
         tasks.append(downside_extension(candle))
 
-    if candle.relatR <= -CLIENT_CONFIG["extreme_extension_threshold"] and candle.rvol >= 1.5: 
+    if candle.relatR <= -settings.EXTREME_EXTENSION_THRESHOLD and candle.rvol >= 1.5: 
          tasks.append(upside_extension(candle))
 
 
 # Euforinen exitti
-    if candle.relatR <= -CLIENT_CONFIG["capitulation_threshold"]:
+    if candle.relatR <= settings.EUFORIC_THRESHOLD:
         tasks.append(relatr_up_exit_strategy(candle))
 # Kapituloiva shortin cover exitti
 
-    if candle.relatR >= CLIENT_CONFIG["capitulation_threshold"]:
+    if candle.relatR >= settings.CAPITULATION_THRESHOLD:
         tasks.append(relatr_down_exit_strategy(candle))
         
-    if candle.time >= CLIENT_CONFIG["endofday"]:
+    if candle.time >= settings.ENDOFDAY:
         tasks.append(endofday_exit_strategy(candle))
 
     # Run all selected strategies concurrently

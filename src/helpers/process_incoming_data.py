@@ -4,7 +4,7 @@ from src.alarms import *
 from src.database.db_functions import *
 
 from src.common.calculate import *
-from src.common.read_configs_in import *
+
 
 from .handle_candles import *
 from .handle_barbuffer import *
@@ -13,10 +13,6 @@ from .ibclient import *
 
 from src.strategies import *
 from zoneinfo import ZoneInfo
-# these codes deal with incoming data and run strategies
-from src.core.config import CLIENT_CONFIG
-
-
 
 
 

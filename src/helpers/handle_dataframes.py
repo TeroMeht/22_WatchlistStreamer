@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 from typing import Optional, List,Dict
 from src.database.db_functions import *
-from src.core.config import CLIENT_CONFIG
+
 
 # Tämä on erillinen koodikirjasto jolla käsittelen sisään tulevia bars dataa pandas dataframeiksi
 logger = logging.getLogger(__name__)  # module-specific logger
@@ -12,6 +12,9 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
+
+from src.core.config import settings
+
 
 @dataclass
 class IncomingBar:
@@ -55,7 +58,7 @@ def intraday_datapipe(bars: List[IncomingBar]) -> pd.DataFrame:
     Convert a list of IncomingBar dataclasses to a pandas DataFrame.
     Keeps datetime as timezone-aware and capitalizes all column names.
     """
-    time_zone = CLIENT_CONFIG["timezone"]
+    time_zone = settings.TIMEZONE
     # Convert dataclasses to DataFrame
     df = pd.DataFrame([asdict(bar) for bar in bars])
 
