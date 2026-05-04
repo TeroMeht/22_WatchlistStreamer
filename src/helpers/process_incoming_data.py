@@ -83,7 +83,7 @@ async def process_bar(store: CandleStore,
     """
     # --- Convert time to configured timezone here ---
 
-    bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(CLIENT_CONFIG["timezone"]))
+    bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(settings.TIMEZONE))
     interval_time = get_2min_interval(bar_time_local)
     last_candle = store.get_last(symbol)
 
