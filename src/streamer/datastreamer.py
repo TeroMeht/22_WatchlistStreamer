@@ -10,11 +10,12 @@ from src.database.db_functions import *
 from src.helpers.utils import *
 from src.streamer.datavalidation import *
 from src.strategies import *
+from src.strategies import set_watchlist_strategies
 
 from src.helpers.ibclient import *
 from src.helpers.handle_dataframes import *
 from src.helpers.process_incoming_data import CandleStore
-from src.symbol_loader.loader import load_symbols_from_folder
+from src.database.watchlist import load_watchlist, create_watchlist_tables
 from src.core.config import settings
 
 
@@ -28,11 +29,25 @@ async def run_streamer(ib):
 
     await delete_all_tables_db_async()
 
-    # Load symbols
-    symbols = load_symbols_from_folder(settings.TICKERS_FOLDER)
+    # --- Load watchlist + per-ticker strategy selection from DB --------------
+    # Source of truth is the `watchlist` / `watchlist_strategies` tables, written
+    # by the 26_ReactFastApp UI. Tables are created on demand inside
+    # load_watchlist() so a fresh DB doesn't fail here.
+    await create_watchlist_tables()
+    watchlist = await load_watchlist()  # {SYMBOL: {strategy_name, ...}}
 
+    if not watchlist:
+        logging.warning(
+            "Watchlist is empty — add tickers via the UI (POST /api/watchlist). "
+            "Streamer has nothing to monitor; exiting."
+        )
+        return
 
-    tickers = [s[0] if isinstance(s, tuple) else s for s in symbols]
+    # Push the mapping into the strategy dispatcher so run_strategies() can
+    # filter entry strategies per ticker.
+    set_watchlist_strategies(watchlist)
+
+    tickers = sorted(watchlist.keys())
     
 
     tasks = []
