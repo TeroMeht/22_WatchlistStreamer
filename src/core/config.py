@@ -25,27 +25,22 @@ class Settings(BaseSettings):
     EXTREME_EXTENSION_THRESHOLD: float
     ALARM_CUTOFF_MINUTES: int
     ENDOFDAY: time
+    # When the trading session starts. Used by strategies that need all rows
+    # since session open (e.g. VWAP continuation). Override via env if needed.
+    SESSION_START: time = time(16, 30)
 
-    # --- Application ---
-    TICKERS_FOLDER: Path
+
     TIMEZONE: str
     EXIT_REQUEST_ENDPOINT: str
     ALARMS_ENDPOINT: str
 
 
     # --- Validators ---
-    @field_validator("ENDOFDAY", mode="before")
-    def parse_endofday(cls, v: Any) -> Any:
+    @field_validator("ENDOFDAY", "SESSION_START", mode="before")
+    def parse_time_fields(cls, v: Any) -> Any:
         """Accept ``HH:MM`` in addition to ISO ``HH:MM:SS``."""
         if isinstance(v, str) and v.count(":") == 1:
             return f"{v}:00"
-        return v
-
-    # Resolves and creates the tickers folder if missing.
-    @field_validator("TICKERS_FOLDER")
-    def validate_tickers_path(cls, v: Path) -> Path:
-        v = v.expanduser().resolve()
-        v.mkdir(parents=True, exist_ok=True)
         return v
 
     @field_validator("TIMEZONE")

@@ -347,6 +347,44 @@ async def fetch_avg_volume_for_candle(candle_row: CandleRow) -> float:
 
 #-----------------Alarms handling----------------------------------------------------------------
 
+async def get_session_rows(table_name: str, day, since_time):
+    """
+    Fetch every row for ``table_name`` on ``day`` where ``Time >= since_time``.
+    Used by strategies that need to look at the entire trading session so far
+    (e.g. VWAP continuation, which evaluates where price has been since the
+    session opened). Returns an empty DataFrame on error or no rows.
+    """
+    pool = get_db_pool()
+    conn = await pool.acquire()
+
+    try:
+        query = f"""
+            SELECT * FROM "{table_name}"
+            WHERE "Date" = $1 AND "Time" >= $2
+            ORDER BY "Date" ASC, "Time" ASC;
+        """
+        rows = await conn.fetch(query, day, since_time)
+
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame([dict(r) for r in rows])
+        # Decimal -> float (matches get_last_rows)
+        numeric_cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = df[col].astype(float)
+        return df
+
+    except Exception as e:
+        logging.error(f"Error fetching session rows for {table_name}: {e}")
+        return pd.DataFrame()
+
+    finally:
+        if conn:
+            await pool.release(conn)
+
+
 async def get_last_rows(table_name:str, num_rows:int):
 
     # Get database connection from pool

@@ -1,0 +1,52 @@
+# =============================================================================
+# Strategy toggles
+# =============================================================================
+# Flip `enabled` on/off to control which strategies run without touching code.
+# Each entry must match a name registered in src/strategies.py via
+# `registry.register(name=...)`. Unknown names are logged as warnings at startup.
+#
+# Adding a brand-new strategy requires:
+#   1) implement the coroutine,
+#   2) `registry.register(...)` it in src/strategies.py,
+#   3) add a `[strategies.<name>]` block here.
+# =============================================================================
+
+# --- Entry strategies ---------------------------------------------------------
+
+[strategies.reversal_long]
+enabled = true
+# EMA9 crossover up after capitulation. Runs when candle.relatR > 0.
+
+[strategies.reversal_short]
+enabled = true
+# EMA9 crossover down after euforia. Runs when candle.relatR < 0.
+
+[strategies.vwap_continuation]
+enabled = true
+# VWAP continuation setup when price returns near VWAP after euforia.
+
+[strategies.downside_extension]
+enabled = false
+# Capitulation alarm on extreme negative relatR (with rvol filter).
+
+[strategies.upside_extension]
+enabled = false
+# Euforic alarm on extreme positive relatR (with rvol filter).
+
+# --- Exit strategies ----------------------------------------------------------
+
+[strategies.vwap_exit]
+enabled = true
+# Exit alarm when price approaches VWAP.
+
+[strategies.relatr_up_exit]
+enabled = true
+# Exit when relatR drops to euforic threshold.
+
+[strategies.relatr_down_exit]
+enabled = true
+# Cover-short exit when relatR rises to capitulation threshold.
+
+[strategies.endofday_exit]
+enabled = true
+# End-of-day exit at settings.ENDOFDAY.
