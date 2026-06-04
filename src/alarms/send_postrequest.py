@@ -34,6 +34,39 @@ async def send_exit_request_to_fastapi(candle: CandleRow, alarm_name: str,fastap
         return None
 
 
+async def send_candle_to_fastapi(candle: CandleRow, fastapi_url: str):
+    """
+    POST a finalized 2-min candle to the FastAPI /api/livestream/emit
+    endpoint. Field names are uppercased to match the FastAPI CandleRow
+    schema (Symbol, Date, Time, Open, ...). Errors are logged and
+    swallowed so a network blip doesn't break candle processing.
+    """
+    payload = {
+        "Symbol":     candle.symbol,
+        "Date":       candle.date.isoformat(),
+        "Time":       candle.time.isoformat(),
+        "Open":       candle.open,
+        "High":       candle.high,
+        "Low":        candle.low,
+        "Close":      candle.close,
+        "Volume":     candle.volume,
+        "VWAP":       candle.vwap,
+        "EMA9":       candle.ema9,
+        "Avg_volume": candle.avg_volume,
+        "Rvol":       candle.rvol,
+        "Relatr":     candle.relatR,
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(fastapi_url, json=payload, timeout=5.0)
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        logger.error(f"Failed to emit livestream candle for {candle.symbol}: {e}")
+        return None
+
+
 async def send_alarm_to_fastapi(candle: CandleRow, alarm_message: str, fastapi_url: str):
     """
     Sends an alarm to FastAPI.
@@ -63,3 +96,5 @@ async def send_alarm_to_fastapi(candle: CandleRow, alarm_message: str, fastapi_u
     except Exception as e:
         logger.error(f"Failed to send alarm for {candle.symbol}: {e}")
         return None
+    
+
