@@ -4,24 +4,17 @@ from src.orders.order_generator import generate_entry_order, detect_stoplevel
 from src.database.db_functions import get_last_rows, get_session_rows
 import asyncio
 import logging
-from pathlib import Path
-from typing import Any, Optional
 
 import pandas as pd
 
 from src.exit_strategies import *
 from src.core.config import settings
-from src.core.strategy_registry import History, registry
 
 logger = logging.getLogger(__name__)
 
 
 # =============================================================================
 # Strategy implementations
-# =============================================================================
-# These keep their original signatures so they stay easy to read/test. The
-# registry adapters at the bottom of this file translate the uniform
-# (candle, history) call into whatever each one expects.
 # =============================================================================
 
 
@@ -79,16 +72,12 @@ async def reversal_short_strategy(last_8_rows: pd.DataFrame, candle: CandleRow):
             )
 
 
-async def vwapcontinuation_strategies(past_dataSet: pd.DataFrame, candle: CandleRow):
+async def vwapcontinuation_short_strategy(past_dataSet: pd.DataFrame, candle: CandleRow):
 
-    logger.info("Running VWAP Continuation strategies for symbol: %s", candle.symbol)
+    logger.info("Running VWAP Continuation short strategy for symbol: %s", candle.symbol)
 
     df_all = past_dataSet
-    # Guard: ``history.session`` is empty (no columns) when get_session_rows
-    # returned zero rows — happens when the first live candle arrives before
-    # any in-session history has accumulated for this symbol (fresh DB after
-    # ``delete_all_tables_db_async``, ticker added mid-session, running before
-    # SESSION_START, etc). Skip cleanly instead of KeyError'ing on "Relatr".
+
     if df_all is None or df_all.empty or "Relatr" not in df_all.columns:
         logger.debug(
             "VWAP continuation: no session history for %s yet — skipping.",
@@ -99,6 +88,39 @@ async def vwapcontinuation_strategies(past_dataSet: pd.DataFrame, candle: Candle
     # Tarvii tarkastaa että onhan hinta ollut viimeaikoina VWAP yläpuolella
     last_5 = df_all.tail(5)
     avg_relatr = last_5["Relatr"].mean()  # lasketaan viimeisimpien 5 candlejen relatr keskiarvo. Tämän etumerkin perusteella päätellään missä hinta on ollut
+
+
+    if avg_relatr > 0: # to the downside
+        # Log the average Relatr for debugging/visibility
+        logger.info(
+            "Price has been below VWAP recently for symbol: %s | avg Relatr of last 5 candles: %.4f",
+            candle.symbol,
+            avg_relatr,
+        )
+        # Detect earlier capitulation
+        if detect_capitulation(df_all, threshold=settings.CAPITULATION_THRESHOLD):
+            logger.info(f"Capitulation detected earlier for symbol: {candle.symbol} now near VWAP, triggering VWAP setup alarm...")
+
+            await generate_signal_alarm(candle=candle,
+                                        signal_name="VWAP continuation short setup")
+
+
+async def vwapcontinuation_long_strategy(past_dataSet: pd.DataFrame, candle: CandleRow):
+
+    logger.info("Running VWAP Continuation long strategy for symbol: %s", candle.symbol)
+
+    df_all = past_dataSet
+    if df_all is None or df_all.empty or "Relatr" not in df_all.columns:
+        logger.debug(
+            "VWAP continuation: no session history for %s yet — skipping.",
+            candle.symbol,
+        )
+        return
+
+    # Tarvii tarkastaa että onhan hinta ollut viimeaikoina VWAP yläpuolella
+    last_5 = df_all.tail(5)
+    avg_relatr = last_5["Relatr"].mean()  # lasketaan viimeisimpien 5 candlejen relatr keskiarvo. Tämän etumerkin perusteella päätellään missä hinta on ollut
+
 
     # Tarkoituksena käyttää samaa kannasta haettua dataa jottei sitä tarvi kysellä uudelleen
     if avg_relatr < 0:  # jos tää on ollut pienempi kuin 0 niin on oltu VWAP yläpuolella
@@ -113,146 +135,7 @@ async def vwapcontinuation_strategies(past_dataSet: pd.DataFrame, candle: Candle
             logger.info(f"Euforia detected earlier for symbol: {candle.symbol} now near VWAP, triggering VWAP setup alarm...")
 
             await generate_signal_alarm(candle=candle,
-                                        signal_name="VWAP continuation setup")
-
-
-async def downside_extension(candle: CandleRow):
-
-    logger.info(f"Capitulation alarm: {candle.symbol} with Relatr: {candle.relatR:.3f}")
-
-    await generate_signal_alarm(candle=candle,
-                                signal_name=f"Capitulation alarm")
-
-
-async def upside_extension(candle: CandleRow):
-    logger.info(f"Euforic extension detected for symbol: {candle.symbol} with Relatr: {candle.relatR:.3f}")
-
-    await generate_signal_alarm(candle=candle,
-                                signal_name=f"Euforic alarm")
-
-
-# =============================================================================
-# Registry wiring
-# =============================================================================
-# Each call below registers one strategy with:
-#   - a guard          : cheap predicate on the candle
-#   - a runner         : async fn taking (candle, History)
-#   - needs_rows       : last-N rows pulled from the DB. Dispatcher fetches
-#                        max(needs_rows) across active strategies ONCE per
-#                        candle and exposes it as history.last_rows.
-#   - needs_session    : if True, dispatcher fetches every row of today's
-#                        session (Date == today AND Time >= SESSION_START)
-#                        ONCE per candle and exposes it as history.session.
-#                        Use this for strategies that need full intraday
-#                        context (e.g. VWAP continuation).
-#
-# To turn a strategy on/off, edit strategies.toml — no code changes needed.
-# To add a new strategy: write the coroutine, register it here, add a block in
-# strategies.toml.
-# =============================================================================
-
-
-async def _reversal_long_runner(candle: CandleRow, history: History):
-    await reversal_strategy(history.last_rows.tail(8), candle)
-
-
-async def _reversal_short_runner(candle: CandleRow, history: History):
-    await reversal_short_strategy(history.last_rows.tail(8), candle)
-
-
-async def _vwap_continuation_runner(candle: CandleRow, history: History):
-    # Needs everything since session open (set via needs_session=True below).
-    await vwapcontinuation_strategies(history.session, candle)
-
-
-async def _vwap_exit_runner(candle: CandleRow, history: History):
-    await vwap_exit_strategy(candle)
-
-
-async def _downside_extension_runner(candle: CandleRow, history: History):
-    await downside_extension(candle)
-
-
-async def _upside_extension_runner(candle: CandleRow, history: History):
-    await upside_extension(candle)
-
-
-async def _relatr_up_exit_runner(candle: CandleRow, history: History):
-    await relatr_up_exit_strategy(candle)
-
-
-async def _relatr_down_exit_runner(candle: CandleRow, history: History):
-    await relatr_down_exit_strategy(candle)
-
-
-async def _endofday_exit_runner(candle: CandleRow, history: History):
-    await endofday_exit_strategy(candle)
-
-
-# --- Entry strategies --------------------------------------------------------
-registry.register(
-    "reversal_long",
-    guard=lambda c: c.relatR > 0,
-    runner=_reversal_long_runner,
-    needs_rows=8,
-)
-
-registry.register(
-    "reversal_short",
-    guard=lambda c: c.relatR < 0,
-    runner=_reversal_short_runner,
-    needs_rows=8,
-)
-
-registry.register(
-    "vwap_continuation",
-    guard=lambda c: is_vwap_close(c, settings.VWAP_DISTANCE),
-    runner=_vwap_continuation_runner,
-    needs_session=True,  # needs every row since SESSION_START, not a fixed N
-)
-
-registry.register(
-    "downside_extension",
-    guard=lambda c: c.relatR >= settings.EXTREME_EXTENSION_THRESHOLD and c.rvol >= 1.5,
-    runner=_downside_extension_runner,
-)
-
-registry.register(
-    "upside_extension",
-    guard=lambda c: c.relatR <= -settings.EXTREME_EXTENSION_THRESHOLD and c.rvol >= 1.5,
-    runner=_upside_extension_runner,
-)
-
-# --- Exit strategies ---------------------------------------------------------
-registry.register(
-    "vwap_exit",
-    guard=lambda c: is_vwap_close(c, settings.VWAP_DISTANCE),
-    runner=_vwap_exit_runner,
-)
-
-registry.register(
-    "relatr_up_exit",
-    guard=lambda c: c.relatR <= settings.EUFORIC_THRESHOLD,
-    runner=_relatr_up_exit_runner,
-)
-
-registry.register(
-    "relatr_down_exit",
-    guard=lambda c: c.relatR >= settings.CAPITULATION_THRESHOLD,
-    runner=_relatr_down_exit_runner,
-)
-
-registry.register(
-    "endofday_exit",
-    guard=lambda c: c.time >= settings.ENDOFDAY,
-    runner=_endofday_exit_runner,
-)
-
-
-# Load toggles once at import time. strategies.toml lives at the project root
-# (two levels up from this file: src/strategies.py -> project root).
-_TOGGLES_PATH = Path(__file__).resolve().parent.parent / "strategies.toml"
-registry.load_toggles(_TOGGLES_PATH)
+                                        signal_name="VWAP continuation long setup")
 
 
 # =============================================================================
@@ -264,21 +147,18 @@ registry.load_toggles(_TOGGLES_PATH)
 # pushes it here via set_watchlist_strategies(). run_strategies() then filters
 # the active entry strategies by what the user picked for *this* symbol.
 #
-# Exit strategies are intentionally NOT filtered — they remain globally enabled
-# via strategies.toml.
+# Exit strategies are intentionally NOT filtered — they run for every symbol
+# that produces a candle.
 #
-# Restart-the-streamer to pick up changes (matches the simple refresh model
+# Restart the streamer to pick up changes (matches the simple refresh model
 # chosen in the design discussion).
 # =============================================================================
 
-# Names of entry strategies (must match registry.register(...) names above).
-# Used to split "entry" from "exit" when filtering by per-ticker selection.
 _ENTRY_STRATEGY_NAMES: frozenset[str] = frozenset({
     "reversal_long",
     "reversal_short",
-    "vwap_continuation",
-    "downside_extension",
-    "upside_extension",
+    "vwap_continuation_long",
+    "vwap_continuation_short",
 })
 
 # Mapping {SYMBOL_UPPER: {strategy_name, ...}}. Empty by default — set_*
@@ -294,7 +174,6 @@ def set_watchlist_strategies(mapping: dict[str, set[str]]) -> None:
     the next streamer restart, which is the agreed refresh model.
     """
     global _watchlist_strategies
-    # Normalize: uppercase symbols, set() of names. Don't mutate caller's dict.
     _watchlist_strategies = {
         (sym or "").upper(): set(strats or ())
         for sym, strats in mapping.items()
@@ -317,52 +196,63 @@ def get_watchlist_strategies() -> dict[str, set[str]]:
 
 
 async def run_strategies(candle: CandleRow):
-    """Run every enabled strategy whose guard fires for this candle.
+    """Run every applicable strategy for this candle.
 
-    Each kind of history is fetched at most ONCE per candle:
-      - last_rows  : depth = max(needs_rows) across active strategies
-      - session    : full session (Date == today AND Time >= SESSION_START)
-                     if any active strategy set needs_session=True
-    The two fetches run in parallel when both are required.
+    Entry strategies are filtered by the user's per-ticker selection
+    (_watchlist_strategies). Exit strategies always run. Each kind of
+    history is fetched at most once per candle, in parallel when both
+    are needed.
     """
-    active = registry.active_for(candle)
-    if not active:
-        return
+    allowed = _watchlist_strategies.get(candle.symbol.upper(), set())
+    vwap_close = is_vwap_close(candle, settings.VWAP_DISTANCE)
 
-    # --- Filter entry strategies by the user's per-ticker selection ---------
-    # _watchlist_strategies is populated at startup from the
-    # `watchlist_strategies` table. Exit strategies are NOT filtered here —
-    # they remain globally enabled via strategies.toml so things like
-    # vwap_exit / endofday_exit keep firing for every symbol that has a
-    # position.
-    allowed_for_symbol = _watchlist_strategies.get(candle.symbol.upper(), set())
-    active = [
-        s for s in active
-        if s.name not in _ENTRY_STRATEGY_NAMES or s.name in allowed_for_symbol
-    ]
-    if not active:
-        return
+    # Entry guards (also gated by per-ticker selection).
+    run_reversal_long = candle.relatR > 0 and "reversal_long" in allowed
+    run_reversal_short = candle.relatR < 0 and "reversal_short" in allowed
+    run_vwap_cont_long = vwap_close and "vwap_continuation_long" in allowed
+    run_vwap_cont_short = vwap_close and "vwap_continuation_short" in allowed
 
+    # Exit guards (always evaluated).
+    run_vwap_exit = vwap_close
+    run_momentum_long_exit = candle.relatR < 0
+    run_momentum_short_exit = candle.relatR > 0
+    run_endofday_exit = candle.time >= settings.ENDOFDAY
+
+    # Fetch only the history kinds that are actually needed, in parallel.
+    # Momentum exits also need the last 8 rows (euforia/capitulation + EMA9
+    # crossover check), so they extend need_last_rows alongside the reversal
+    # entries.
     table_name = f"{candle.symbol.lower()}_livestream"
-    max_rows = max((s.needs_rows for s in active), default=0)
-    need_session = any(s.needs_session for s in active)
-
-    # Fetch whichever history kinds are needed, in parallel.
-    history = History()
-    fetches: list[tuple[str, Any]] = []
-    if max_rows > 0:
-        fetches.append(("last_rows", get_last_rows(table_name=table_name, num_rows=max_rows)))
-    if need_session:
-        fetches.append(("session", get_session_rows(
+    fetches = {}
+    if (run_reversal_long or run_reversal_short
+            or run_momentum_long_exit or run_momentum_short_exit):
+        fetches["last_rows"] = get_last_rows(table_name=table_name, num_rows=8)
+    if run_vwap_cont_long or run_vwap_cont_short:
+        fetches["session"] = get_session_rows(
             table_name=table_name,
             day=candle.date,
             since_time=settings.SESSION_START,
-        )))
+        )
+    results = dict(zip(fetches, await asyncio.gather(*fetches.values())))
+    last_rows = results.get("last_rows")
+    session = results.get("session")
 
-    if fetches:
-        keys = [k for k, _ in fetches]
-        results = await asyncio.gather(*(c for _, c in fetches))
-        for key, result in zip(keys, results):
-            setattr(history, key, result)
+    coros = []
+    if run_reversal_long:
+        coros.append(reversal_strategy(last_rows.tail(8), candle))
+    if run_reversal_short:
+        coros.append(reversal_short_strategy(last_rows.tail(8), candle))
+    if run_vwap_cont_long:
+        coros.append(vwapcontinuation_long_strategy(session, candle))
+    if run_vwap_cont_short:
+        coros.append(vwapcontinuation_short_strategy(session, candle))
+    if run_vwap_exit:
+        coros.append(vwap_exit_strategy(candle))
+    if run_momentum_long_exit:
+        coros.append(momentum_long_exit(last_rows.tail(8), candle))
+    if run_momentum_short_exit:
+        coros.append(momentum_short_exit(last_rows.tail(8), candle))
+    if run_endofday_exit:
+        coros.append(endofday_exit_strategy(candle))
 
-    await asyncio.gather(*(s.runner(candle, history) for s in active))
+    await asyncio.gather(*coros)
