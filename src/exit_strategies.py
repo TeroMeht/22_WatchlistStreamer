@@ -20,11 +20,11 @@ async def momentum_long_exit(last_8_rows: pd.DataFrame,candle: CandleRow):
             last_row = last_8_rows.iloc[-1]
             logging.info(f"{last_row['Symbol']}: EMA9 crossover down detected, generating alarm...")
 
-        await send_exit_request_to_fastapi(
-            candle=candle,
-            alarm_name="momentum_long_exit",
-            fastapi_url=settings.EXIT_REQUEST_ENDPOINT
-        )
+            await send_exit_request_to_fastapi(
+                candle=candle,
+                alarm_name="momentum_long_exit",
+                fastapi_url=settings.EXIT_REQUEST_ENDPOINT
+            )
 
 
 async def momentum_short_exit(last_8_rows: pd.DataFrame, candle: CandleRow):
@@ -39,11 +39,11 @@ async def momentum_short_exit(last_8_rows: pd.DataFrame, candle: CandleRow):
             last_row = last_8_rows.iloc[-1]
             logging.info(f"{last_row['Symbol']}: EMA9 crossover up detected, generating alarm...")
 
-        await send_exit_request_to_fastapi(
-            candle=candle,
-            alarm_name="momentum_short_exit",
-            fastapi_url=settings.EXIT_REQUEST_ENDPOINT
-        )
+            await send_exit_request_to_fastapi(
+                candle=candle,
+                alarm_name="momentum_short_exit",
+                fastapi_url=settings.EXIT_REQUEST_ENDPOINT
+            )
 
 
 async def endofday_exit_strategy(candle: CandleRow):
