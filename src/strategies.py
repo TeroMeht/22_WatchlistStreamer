@@ -154,12 +154,7 @@ async def vwapcontinuation_long_strategy(past_dataSet: pd.DataFrame, candle: Can
 # chosen in the design discussion).
 # =============================================================================
 
-_ENTRY_STRATEGY_NAMES: frozenset[str] = frozenset({
-    "reversal_long",
-    "reversal_short",
-    "vwap_continuation_long",
-    "vwap_continuation_short",
-})
+
 
 # Mapping {SYMBOL_UPPER: {strategy_name, ...}}. Empty by default — set_*
 # is called from run_streamer() after loading from the DB.
@@ -246,6 +241,7 @@ async def run_strategies(candle: CandleRow):
         coros.append(vwapcontinuation_long_strategy(session, candle))
     if run_vwap_cont_short:
         coros.append(vwapcontinuation_short_strategy(session, candle))
+        
     if run_vwap_exit:
         coros.append(vwap_exit_strategy(candle))
     if run_momentum_long_exit:

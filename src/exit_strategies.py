@@ -46,10 +46,6 @@ async def momentum_short_exit(last_8_rows: pd.DataFrame, candle: CandleRow):
         )
 
 
-
-
-
-
 async def endofday_exit_strategy(candle: CandleRow):
     logger.info("Running EoD exit for symbol: %s", candle.symbol)
 
@@ -68,3 +64,4 @@ async def vwap_exit_strategy(candle: CandleRow):
         alarm_name="vwap_exit",
         fastapi_url=settings.EXIT_REQUEST_ENDPOINT
     )
+

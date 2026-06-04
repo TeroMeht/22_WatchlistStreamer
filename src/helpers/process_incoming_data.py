@@ -12,6 +12,8 @@ from .utils import *
 from .ibclient import *
 
 from src.strategies import *
+from src.alarms.send_postrequest import send_candle_to_fastapi
+from src.core.config import settings
 from zoneinfo import ZoneInfo
 
 
@@ -70,6 +72,9 @@ async def finalize_candle(last_candle,
     db_ready_candle = enforce_candle_row_types(last_candle)  # Ensure all floats
     logger.info(f"Finalized candle for {symbol} at {last_candle.time}: O={last_candle.open}, H={last_candle.high}, L={last_candle.low}, C={last_candle.close}, V={last_candle.volume}, VWAP={last_candle.vwap}, EMA9={last_candle.ema9}, RelatR={last_candle.relatR}, AvgVol={last_candle.avg_volume}, RVol={last_candle.rvol}")
     await insert_candlestick_row(db_ready_candle)
+    # Push the finalized row to FastAPI for the live SSE table. Errors are
+    # logged inside the sender so a network blip won't block run_strategies.
+    await send_candle_to_fastapi(db_ready_candle, settings.LIVESTREAM_EMIT_ENDPOINT)
     await run_strategies(last_candle)
 
 
