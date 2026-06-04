@@ -34,6 +34,23 @@ async def send_exit_request_to_fastapi(candle: CandleRow, alarm_name: str,fastap
         return None
 
 
+async def send_streamer_status(fastapi_url: str, label: str = "status", payload: dict | None = None):
+    """
+    Fire one POST at a streamer-status endpoint (start or stop). Short
+    timeout + swallowed errors so shutdown can't hang on a flaky network.
+    On /start we send {"pid": os.getpid()} so the backend can watch the
+    process for hard kills (closing the cmd window, kill -9, etc.).
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(fastapi_url, json=payload or {}, timeout=3.0)
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        logger.warning(f"Streamer {label} signal to {fastapi_url} failed: {e}")
+        return None
+
+
 async def send_candle_to_fastapi(candle: CandleRow, fastapi_url: str):
     """
     POST a finalized 2-min candle to the FastAPI /api/livestream/emit
@@ -70,19 +87,18 @@ async def send_candle_to_fastapi(candle: CandleRow, fastapi_url: str):
 async def send_alarm_to_fastapi(candle: CandleRow, alarm_message: str, fastapi_url: str):
     """
     Sends an alarm to FastAPI.
-    
+
     :param candle: CandleRow object containing candle info
     :param alarm_message: The alarm message to send
     :param fastapi_url: URL of the FastAPI endpoint
     :return: JSON response from FastAPI or None if failed
     """
-    # Prepare payload matching FastAPI schema
     payload = {
-        "Id": 0,   # fallback 0 if id not present
+        "Id": 0,
         "Symbol": candle.symbol,
-        "Time": candle.time.isoformat(),   # time -> ISO string
+        "Time": candle.time.isoformat(),
         "Alarm": alarm_message,
-        "Date": candle.date.isoformat()    # date -> ISO string
+        "Date": candle.date.isoformat(),
     }
 
     try:
@@ -92,9 +108,6 @@ async def send_alarm_to_fastapi(candle: CandleRow, alarm_message: str, fastapi_u
             json_response = response.json()
             logger.info(f"Sent alarm for {candle.symbol}: {json_response}")
             return json_response
-
     except Exception as e:
         logger.error(f"Failed to send alarm for {candle.symbol}: {e}")
         return None
-    
-

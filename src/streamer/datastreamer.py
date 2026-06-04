@@ -1,8 +1,10 @@
 
 from src.helpers.ibclient import monitor_tickers
 from src.database.db_functions import delete_all_tables_db_async
+from src.alarms.send_postrequest import send_streamer_status
 import asyncio
 import logging
+import os
 
 from src.database.db_functions import *
 
@@ -22,10 +24,21 @@ from src.core.config import settings
 async def run_streamer(ib):
     """
     Handles all logic for data fetching, ATR calculations, and live monitoring.
+
+    Fires one POST to the FastAPI start endpoint as the very first thing so
+    the UI dot flips green immediately, and one POST to the stop endpoint
+    in a try/finally so a clean shutdown (Ctrl-C, normal exit) flips it
+    gray. A hard crash skips the stop signal — known tradeoff.
     """
 
     candle_store = CandleStore()
 
+    # Send our PID so the backend can watch the process for hard kills.
+    await send_streamer_status(
+        settings.STREAMER_START_ENDPOINT,
+        label="start",
+        payload={"pid": os.getpid()},
+    )
 
     await delete_all_tables_db_async()
 
@@ -99,7 +112,8 @@ async def run_streamer(ib):
 
     logging.warning(f"Dropped tickers: {dropped_tickers}")
     logging.info("Starting live monitoring...")
-    # --- Start live monitoring tasks ---#    
+
+    # --- Start live monitoring tasks ---#
     live_tasks = [monitor_tickers(candle_store,
                                     last_atr_dict.get(ticker),
                                     ib,
@@ -108,5 +122,9 @@ async def run_streamer(ib):
         for ticker in valid_tickers
     ]
 
-    await asyncio.gather(*live_tasks)
-    
+    try:
+        await asyncio.gather(*live_tasks)
+    finally:
+        # Fire the stop signal on any clean exit (Ctrl-C, normal
+        # return, caller cancellation). Hard crashes will skip this.
+        await send_streamer_status(settings.STREAMER_STOP_ENDPOINT, label="stop")
