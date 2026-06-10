@@ -18,6 +18,7 @@ from src.helpers.ibclient import *
 from src.helpers.handle_dataframes import *
 from src.helpers.process_incoming_data import CandleStore
 from src.database.watchlist import load_watchlist, create_watchlist_tables
+from src.database.exit_requests import load_armed_exit_strategies
 from src.core.config import settings
 
 
@@ -43,21 +44,40 @@ async def run_streamer(ib):
     await delete_all_tables_db_async()
 
     # --- Load watchlist + per-ticker strategy selection from DB --------------
-    # Source of truth is the `watchlist` / `watchlist_strategies` tables, written
-    # by the 26_ReactFastApp UI. Tables are created on demand inside
-    # load_watchlist() so a fresh DB doesn't fail here.
+    # Source of truth for entries is the `watchlist` / `watchlist_strategies`
+    # tables, written by the 26_ReactFastApp UI. Tables are created on demand
+    # inside load_watchlist() so a fresh DB doesn't fail here.
     await create_watchlist_tables()
     watchlist = await load_watchlist()  # {SYMBOL: {strategy_name, ...}}
 
+    # We also need to monitor any symbol that has an armed exit request, even
+    # if it's NOT on the watchlist — otherwise an open position with an exit
+    # plan but no entry binding would receive no candles and the exit would
+    # never fire. Source of truth for exits is the shared `exit_requests`
+    # table; symbols there get a synthetic empty entry-strategy set so the
+    # entry dispatcher skips them while exits still run normally.
+    armed_exits = await load_armed_exit_strategies()
+    for symbol in armed_exits.keys():
+        watchlist.setdefault(symbol, set())
+
     if not watchlist:
         logging.warning(
-            "Watchlist is empty — add tickers via the UI (POST /api/watchlist). "
-            "Streamer has nothing to monitor; exiting."
+            "Nothing to monitor: watchlist is empty AND no armed exit "
+            "requests exist. Add tickers via the UI (POST /api/watchlist) "
+            "or arm an exit plan; exiting."
         )
         return
 
+    logging.info(
+        "Monitor set: %d symbols (%d from watchlist, %d added from exit_requests)",
+        len(watchlist),
+        sum(1 for s in watchlist if s not in armed_exits or watchlist[s]),
+        sum(1 for s in armed_exits if s in watchlist and not watchlist[s]),
+    )
+
     # Push the mapping into the strategy dispatcher so run_strategies() can
-    # filter entry strategies per ticker.
+    # filter entry strategies per ticker. Symbols pulled in from exit_requests
+    # have an empty entry set, so only exits fire for them.
     set_watchlist_strategies(watchlist)
 
     tickers = sorted(watchlist.keys())

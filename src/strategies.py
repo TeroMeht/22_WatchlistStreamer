@@ -2,8 +2,11 @@ from src.alarms.alarm_logics import *
 from src.alarms.alarm_generator import generate_signal_alarm
 from src.orders.order_generator import generate_entry_order, detect_stoplevel
 from src.database.db_functions import get_last_rows, get_session_rows
+from src.database.exit_requests import load_armed_exit_strategies
 import asyncio
 import logging
+import time as _time
+from typing import Dict, Set
 
 import pandas as pd
 
@@ -11,6 +14,45 @@ from src.exit_strategies import *
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Armed-exits cache (read from the shared exit_requests table)
+# =============================================================================
+# Exit strategies fire only when the (symbol, strategy) row is armed in the
+# DB — same model as entry strategies being filtered by watchlist_strategies.
+# Users arm and disarm exits from the 26_ReactFastApp UI throughout the
+# session, so we re-read the table on a short TTL instead of snapshotting at
+# startup. The query is small (single small table, no joins) so the load is
+# negligible even at one refresh per candle.
+
+_armed_exits_cache: Dict[str, Set[str]] = {}
+_armed_exits_cache_at: float = 0.0
+_ARMED_EXITS_TTL_SECONDS: float = 5.0
+_armed_exits_lock = asyncio.Lock()
+
+
+async def _get_armed_exits_for(symbol: str) -> Set[str]:
+    """
+    Return the set of strategy names currently armed for `symbol`.
+    Refreshes the in-memory cache every _ARMED_EXITS_TTL_SECONDS so newly
+    armed / disarmed rows take effect within a few seconds.
+    """
+    global _armed_exits_cache, _armed_exits_cache_at
+    now = _time.monotonic()
+    if now - _armed_exits_cache_at > _ARMED_EXITS_TTL_SECONDS:
+        async with _armed_exits_lock:
+            # Double-check inside the lock so concurrent candles for
+            # different symbols don't all reload simultaneously.
+            if _time.monotonic() - _armed_exits_cache_at > _ARMED_EXITS_TTL_SECONDS:
+                _armed_exits_cache = await load_armed_exit_strategies()
+                _armed_exits_cache_at = _time.monotonic()
+                logger.debug(
+                    "Refreshed armed exits cache: %d symbols, %d bindings",
+                    len(_armed_exits_cache),
+                    sum(len(v) for v in _armed_exits_cache.values()),
+                )
+    return _armed_exits_cache.get(symbol.upper(), set())
 
 
 # =============================================================================
@@ -194,11 +236,14 @@ async def run_strategies(candle: CandleRow):
     """Run every applicable strategy for this candle.
 
     Entry strategies are filtered by the user's per-ticker selection
-    (_watchlist_strategies). Exit strategies always run. Each kind of
-    history is fetched at most once per candle, in parallel when both
-    are needed.
+    (_watchlist_strategies). Exit strategies are filtered by which
+    (symbol, strategy) rows are currently armed in the shared
+    exit_requests table — refreshed on a short TTL so UI edits propagate
+    within seconds. Each kind of candle history is fetched at most once
+    per candle, in parallel when both are needed.
     """
     allowed = _watchlist_strategies.get(candle.symbol.upper(), set())
+    armed_exits = await _get_armed_exits_for(candle.symbol)
     vwap_close = is_vwap_close(candle, settings.VWAP_DISTANCE)
 
     # Entry guards (also gated by per-ticker selection).
@@ -207,11 +252,14 @@ async def run_strategies(candle: CandleRow):
     run_vwap_cont_long = vwap_close and "vwap_continuation_long" in allowed
     run_vwap_cont_short = vwap_close and "vwap_continuation_short" in allowed
 
-    # Exit guards (always evaluated).
-    run_vwap_exit = vwap_close
-    run_momentum_long_exit = candle.relatR < 0
-    run_momentum_short_exit = candle.relatR > 0
-    run_endofday_exit = candle.time >= settings.ENDOFDAY
+    # Exit guards — must be *both* in the right market condition AND armed
+    # for this symbol in exit_requests. No armed row = no streamer fire.
+    run_vwap_exit = vwap_close and "vwap_exit" in armed_exits
+    run_momentum_long_exit = "momentum_long_exit" in armed_exits
+    run_momentum_short_exit = "momentum_short_exit" in armed_exits
+    run_endofday_exit = (
+        candle.time >= settings.ENDOFDAY and "endofday_exit" in armed_exits
+    )
 
     # Fetch only the history kinds that are actually needed, in parallel.
     # Momentum exits also need the last 8 rows (euforia/capitulation + EMA9
