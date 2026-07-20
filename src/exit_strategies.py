@@ -6,8 +6,38 @@ from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Exit/ Trim into Relatr strength. Frontside exit point.
+async def trim_into_strength(last_8_rows: pd.DataFrame, candle: CandleRow):
+    logger.info("Running trim into strength exit for symbol: %s", candle.symbol)
+
+    # Check for euforia using the DataFrame
+    if detect_euforia(last_8_rows, threshold=settings.CAPITULATION_THRESHOLD):
+        logger.debug("Euforia detected for symbol: %s. Checking Relatr strength...", candle.symbol)
+
+        await send_exit_request_to_fastapi(
+            candle=candle,
+            alarm_name="trim_into_strength",
+            fastapi_url=settings.EXIT_REQUEST_ENDPOINT
+        )
 
 
+# Exit/ Trim into Relatr weakness. Frontside exit point.
+async def trim_into_weakness(last_8_rows: pd.DataFrame, candle: CandleRow):
+    logger.info("Running trim into weakness exit for symbol: %s", candle.symbol)
+
+    # Check for capitulation using the DataFrame
+    if detect_capitulation(last_8_rows, threshold=settings.CAPITULATION_THRESHOLD):
+        logger.debug("Capitulation detected for symbol: %s. Checking Relatr weakness...", candle.symbol)
+
+        await send_exit_request_to_fastapi(
+            candle=candle,
+            alarm_name="trim_into_weakness",
+            fastapi_url=settings.EXIT_REQUEST_ENDPOINT
+        )
+
+
+
+# Exit ema9 close crossovers
 async def momentum_long_exit(last_8_rows: pd.DataFrame,candle: CandleRow):
 
     logger.info("Running momentum long exit for symbol: %s", candle.symbol)
