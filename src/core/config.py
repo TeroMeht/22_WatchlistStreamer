@@ -34,11 +34,8 @@ class Settings(BaseSettings):
     EXIT_REQUEST_ENDPOINT: str
     ALARMS_ENDPOINT: str
     LIVESTREAM_EMIT_ENDPOINT: str
-    # FastAPI POST targets for the streamer's lifecycle. Fired once each:
-    # start when run_streamer launches, stop in its finally-block. Drives
-    # the green/gray dot in the UI.
     STREAMER_START_ENDPOINT: str
-    STREAMER_STOP_ENDPOINT: str
+
 
 
     # --- Validators ---

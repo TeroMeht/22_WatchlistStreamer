@@ -141,10 +141,5 @@ async def run_streamer(ib):
                                 )
         for ticker in valid_tickers
     ]
+    await asyncio.gather(*live_tasks)
 
-    try:
-        await asyncio.gather(*live_tasks)
-    finally:
-        # Fire the stop signal on any clean exit (Ctrl-C, normal
-        # return, caller cancellation). Hard crashes will skip this.
-        await send_streamer_status(settings.STREAMER_STOP_ENDPOINT, label="stop")

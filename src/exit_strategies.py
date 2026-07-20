@@ -1,4 +1,5 @@
 from src.alarms.alarm_logics import *
+from src.database.db_functions import get_last_rows
 import logging
 from src.helpers.utils import *
 from src.alarms.send_postrequest import send_exit_request_to_fastapi
@@ -7,11 +8,11 @@ from src.core.config import settings
 logger = logging.getLogger(__name__)
 
 # Exit/ Trim into Relatr strength. Frontside exit point.
-async def trim_into_strength(last_8_rows: pd.DataFrame, candle: CandleRow):
+async def trim_into_strength(candle: CandleRow):
     logger.info("Running trim into strength exit for symbol: %s", candle.symbol)
 
     # Check for euforia using the DataFrame
-    if detect_euforia(last_8_rows, threshold=settings.CAPITULATION_THRESHOLD):
+    if candle.relatR < settings.EUFORIC_THRESHOLD:
         logger.debug("Euforia detected for symbol: %s. Checking Relatr strength...", candle.symbol)
 
         await send_exit_request_to_fastapi(
@@ -22,11 +23,11 @@ async def trim_into_strength(last_8_rows: pd.DataFrame, candle: CandleRow):
 
 
 # Exit/ Trim into Relatr weakness. Frontside exit point.
-async def trim_into_weakness(last_8_rows: pd.DataFrame, candle: CandleRow):
+async def trim_into_weakness(candle: CandleRow):
     logger.info("Running trim into weakness exit for symbol: %s", candle.symbol)
 
     # Check for capitulation using the DataFrame
-    if detect_capitulation(last_8_rows, threshold=settings.CAPITULATION_THRESHOLD):
+    if candle.relatR > settings.CAPITULATION_THRESHOLD:
         logger.debug("Capitulation detected for symbol: %s. Checking Relatr weakness...", candle.symbol)
 
         await send_exit_request_to_fastapi(
@@ -38,17 +39,18 @@ async def trim_into_weakness(last_8_rows: pd.DataFrame, candle: CandleRow):
 
 
 # Exit ema9 close crossovers
-async def momentum_long_exit(last_8_rows: pd.DataFrame,candle: CandleRow):
-
+async def momentum_long_exit(candle: CandleRow):
     logger.info("Running momentum long exit for symbol: %s", candle.symbol)
 
-    # Check for euforia using the DataFrame
-    if detect_euforia(last_8_rows, threshold=settings.CAPITULATION_THRESHOLD):
-        logger.debug("Euforia detected for symbol: %s. Checking EMA9 crossover...", candle.symbol)
+    df_all = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
 
-        if is_crossover_down(last_8_rows.tail(2)):
-            last_row = last_8_rows.iloc[-1]
-            logging.info(f"{last_row['Symbol']}: EMA9 crossover down detected, generating alarm...")
+    if is_crossover_down(df_all.tail(2)):
+        last_row = df_all.iloc[-1]
+        logging.info(f"{last_row['Symbol']}: EMA9 crossover down detected")
+        # Check for euforia using the DataFrame
+
+        if detect_euforia(df_all, threshold=settings.CAPITULATION_THRESHOLD):
+            logger.debug("Euforia detected for symbol: %s. Generating exit signal", candle.symbol)
 
             await send_exit_request_to_fastapi(
                 candle=candle,
@@ -57,17 +59,18 @@ async def momentum_long_exit(last_8_rows: pd.DataFrame,candle: CandleRow):
             )
 
 
-async def momentum_short_exit(last_8_rows: pd.DataFrame, candle: CandleRow):
-
+async def momentum_short_exit(candle: CandleRow):
     logger.info("Running momentum short exit for symbol: %s", candle.symbol)
 
-    # Check for capitulation using the DataFrame
-    if detect_capitulation(last_8_rows, threshold=settings.CAPITULATION_THRESHOLD):
-        logger.debug("Capitulation detected for symbol: %s. Checking EMA9 crossover...", candle.symbol)
+    df_all = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
 
-        if is_crossover_up(last_8_rows.tail(2)):
-            last_row = last_8_rows.iloc[-1]
-            logging.info(f"{last_row['Symbol']}: EMA9 crossover up detected, generating alarm...")
+    if is_crossover_up(df_all.tail(2)):
+        last_row = df_all.iloc[-1]
+        logging.info(f"{last_row['Symbol']}: EMA9 crossover up detected")
+
+        # Check for capitulation using the DataFrame
+        if detect_capitulation(df_all, threshold=settings.CAPITULATION_THRESHOLD):
+            logger.debug("Capitulation detected for symbol: %s. Generating exit signal", candle.symbol)
 
             await send_exit_request_to_fastapi(
                 candle=candle,
@@ -79,19 +82,23 @@ async def momentum_short_exit(last_8_rows: pd.DataFrame, candle: CandleRow):
 async def endofday_exit_strategy(candle: CandleRow):
     logger.info("Running EoD exit for symbol: %s", candle.symbol)
 
-    await send_exit_request_to_fastapi(
-        candle=candle,
-        alarm_name="endofday_exit",
-        fastapi_url=settings.EXIT_REQUEST_ENDPOINT
-    )
+    if candle.time >= settings.EOD_EXIT_TIME:
+        logger.debug("EoD exit time reached for symbol: %s. Sending exit request...", candle.symbol)
+        await send_exit_request_to_fastapi(
+            candle=candle,
+            alarm_name="endofday_exit",
+            fastapi_url=settings.EXIT_REQUEST_ENDPOINT
+        )
 
 
 async def vwap_exit_strategy(candle: CandleRow):
-    logger.info("Running vwap exit for symbol: %s", candle.symbol)
+    logger.info("Running VWAP exit for symbol: %s", candle.symbol)
 
-    await send_exit_request_to_fastapi(
-        candle=candle,
-        alarm_name="vwap_exit",
-        fastapi_url=settings.EXIT_REQUEST_ENDPOINT
-    )
+    if is_vwap_close(candle, settings.VWAP_DISTANCE):
+        logger.debug("VWAP close detected for symbol: %s. Sending exit request...", candle.symbol)
+        await send_exit_request_to_fastapi(
+            candle=candle,
+            alarm_name="vwap_exit",
+            fastapi_url=settings.EXIT_REQUEST_ENDPOINT
+        )
 

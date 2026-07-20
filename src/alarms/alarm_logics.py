@@ -34,6 +34,8 @@ def detect_capitulation(df:pd.DataFrame, threshold:float)-> bool:
 
     return False
 
+
+
 def detect_euforia(df:pd.DataFrame, threshold:float)-> bool:
     """
     Detect euphoria: opposite of capitulation.
@@ -41,7 +43,7 @@ def detect_euforia(df:pd.DataFrame, threshold:float)-> bool:
     """
     try:
         # Vectorized check: select all rows below negative threshold
-        euforia_rows = df[df["Relatr"] <= -threshold]
+        euforia_rows = df[df["Relatr"] <= threshold]
         # No rows met the condition
         if euforia_rows.empty:
             logging.debug("No euforia rows found (Relatr >= %.3f).", threshold)

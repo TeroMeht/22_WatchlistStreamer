@@ -138,26 +138,18 @@ def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:s
     # Step 5: Split today vs past
     today = date.today()
 
-    # Past 4 days still feed the avg-volume model
+    df_today = df[df["Date"] == today].copy()
     df_past = df[df["Date"] != today].copy()
-
-    # Use the FULL 5-day intraday frame so we can compare calculations
-    # day-by-day against the live table.
-    df_today = df.copy()
-
-    # Same session-start cutoff as before, applied across all 5 days
+    # Keep only rows with time >= 11:00
     df_today = df_today[df_today["Time"] >= time(11, 0)]
+
 
     df_past = df_past[["Symbol","Date","Time","Open","High","Low","Close","Volume"]]
 
-    # Average-volume model: per Symbol+Time-of-day across the past 4 sessions
+    # Step 5: Calculate average volume model
     df_past = calculate_avg_volume_model([df_past])
-
-    # VWAP / EMA9 must reset each session, so compute them per Date
-    df_today = df_today.groupby("Date", group_keys=False).apply(calculate_vwap)
-    df_today = df_today.groupby("Date", group_keys=False).apply(
-        lambda g: calculate_ema(g, period=9)
-    )
+    df_today = calculate_vwap(df_today)
+    df_today = calculate_ema(df_today, period=9)
 
     df_today = df_today[[
         "Symbol","Date","Time","Open","High","Low","Close","Volume","VWAP","EMA9"
@@ -227,11 +219,7 @@ def handle_intraday_rvol_dataset(intraday_results: list[pd.DataFrame], avg_volum
             on=['Symbol', 'Time'],
             how='left'
         )
-        # Rvol's cumulative sums must reset each session
-        merged_df = (
-            merged_df.groupby('Date', group_keys=False)
-                     .apply(calculate_rvol)
-        )
+        merged_df = calculate_rvol(merged_df)
 
         rvol_datasets[symbol] = merged_df
         logger.debug(f"{symbol} - last 10 rows with Rvol:\n{merged_df.tail(10)}")
