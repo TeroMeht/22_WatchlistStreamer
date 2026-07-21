@@ -33,7 +33,6 @@ class Settings(BaseSettings):
     TIMEZONE: str
     EXIT_REQUEST_ENDPOINT: str
     ALARMS_ENDPOINT: str
-    LIVESTREAM_EMIT_ENDPOINT: str
     STREAMER_START_ENDPOINT: str
 
 
