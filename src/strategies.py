@@ -10,6 +10,7 @@ from typing import Dict, Set
 
 from src.exit_strategies import *
 from src.entry_strategies import *
+from src.entry_strategies_realtime import orb_breakout_long
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -169,4 +170,46 @@ async def run_strategies(candle: CandleRow):
         *_entry_coros(candle, entry_gates),
         *_exit_coros(candle, exit_gates),
     ]
+    await asyncio.gather(*coros)
+
+
+# =============================================================================
+# Realtime (5-sec) entry dispatch
+# =============================================================================
+#
+# Some entries -- e.g. ORB breakout -- need to fire the instant price crosses
+# a level, so waiting for the next 2-min candle to finalize is too slow. They
+# run on every 5-sec bar in their own dispatcher, gated by the same
+# per-ticker watchlist mapping used above.
+
+
+def _gate_realtime_entries(allowed: Set[str]) -> dict:
+    """Which realtime (5-sec) entry strategies should fire for this bar."""
+    return {
+        "orb_breakout_long": "orb_breakout_long" in allowed,
+    }
+
+
+def _realtime_entry_coros(bar, symbol: str, gates: dict) -> list:
+    """Build the realtime entry-strategy coroutines that passed their gates."""
+    coros = []
+    if gates["orb_breakout_long"]:
+        coros.append(orb_breakout_long(bar, symbol))
+    return coros
+
+
+async def run_realtime_strategies(bar, symbol: str) -> None:
+    """
+    Run per-bar entry strategies for every incoming 5-sec ``bar``.
+
+    Called from ``process_bar`` on every 5-sec tick, *in addition to* the
+    2-min ``run_strategies`` fired from ``finalize_candle``. Kept lean --
+    strategies here should return immediately when their gate is closed or
+    their reference data isn't ready yet.
+    """
+    allowed = _watchlist_strategies.get(symbol.upper(), set())
+    entry_gates = _gate_realtime_entries(allowed)
+    coros = _realtime_entry_coros(bar, symbol, entry_gates)
+    if not coros:
+        return
     await asyncio.gather(*coros)

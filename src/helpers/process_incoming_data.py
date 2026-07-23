@@ -93,6 +93,12 @@ async def process_bar(store: CandleStore,
     logging.debug(f"New 5-sec bar for {symbol} at {bar_time_local.strftime('%H:%M:%S %Z')}: "
     f"Last= {bar.close}, Volume= {bar.volume}")
 
+    # --- Realtime (5-sec) entry strategies ---
+    # Fire per-bar strategies (e.g. ORB breakout) on every incoming 5-sec bar,
+    # independent of the 2-min aggregation below. Kept before aggregation so
+    # a breakout can trigger the instant price crosses the level.
+    await run_realtime_strategies(bar, symbol)
+
     if not store.seen_minute(symbol, interval_time):
         store.add_minute(symbol, interval_time)
 
