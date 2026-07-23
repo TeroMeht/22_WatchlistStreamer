@@ -39,6 +39,7 @@ class ReferenceLevel:
     """Immutable snapshot of the 16:32 candle for one symbol on one date."""
     symbol: str
     ref_date: date
+    ref_time: time      # the reference candle's Time (16:32 in production)
     ref_close: float
     ref_low: float
 
@@ -67,7 +68,7 @@ async def _fetch_reference_row(symbol: str, day: date) -> Optional[ReferenceLeve
     """
     table_name = f"{symbol.lower()}_livestream"
     query = f"""
-        SELECT "Close", "Low"
+        SELECT "Time", "Close", "Low"
         FROM "{table_name}"
         WHERE "Date" = $1 AND "Time" = $2
         LIMIT 1;
@@ -92,6 +93,7 @@ async def _fetch_reference_row(symbol: str, day: date) -> Optional[ReferenceLeve
     return ReferenceLevel(
         symbol=symbol.upper(),
         ref_date=day,
+        ref_time=row["Time"],
         ref_close=float(row["Close"]),
         ref_low=float(row["Low"]),
     )
@@ -118,8 +120,9 @@ async def get_reference_level(symbol: str, today: date) -> Optional[ReferenceLev
         if fetched is not None:
             _cache[key] = fetched
             logger.info(
-                "reference_level cached: %s date=%s close=%.2f low=%.2f",
-                fetched.symbol, fetched.ref_date, fetched.ref_close, fetched.ref_low,
+                "reference_level cached: %s -- 2m candle %s %s close=%.2f low=%.2f",
+                fetched.symbol, fetched.ref_date, fetched.ref_time,
+                fetched.ref_close, fetched.ref_low,
             )
         return fetched
 

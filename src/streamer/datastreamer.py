@@ -19,6 +19,8 @@ from src.helpers.handle_dataframes import *
 from src.helpers.process_incoming_data import CandleStore
 from src.database.watchlist import load_watchlist, create_watchlist_tables
 from src.database.exit_requests import load_armed_exit_strategies
+from src.visualization.orb_dashboard import start_dashboard
+from src.visualization import orb_state as viz
 from src.core.config import settings
 
 
@@ -40,6 +42,10 @@ async def run_streamer(ib):
         label="start",
         payload={"pid": os.getpid()},
     )
+
+    # Bring up the ORB visualization dashboard (localhost:8765). Non-fatal
+    # if aiohttp isn't installed -- start_dashboard logs and returns None.
+    await start_dashboard()
 
     await delete_all_tables_db_async()
 
@@ -125,6 +131,41 @@ async def run_streamer(ib):
         create_and_fill_avg_volume_tables_async(past_intradaydata),
         *(create_and_fill_table_async(df) for df in relatr_datasets.values())
     )
+
+    # --- Seed the ORB dashboard with the historical 2-min candles now
+    # sitting in each livestream table. Live 5-sec ticks will animate the
+    # next candle after these; finalize_candle will keep appending as the
+    # session runs. Only the intraday OHLC columns are needed.
+    for symbol, df in relatr_datasets.items():
+        if df is None or df.empty:
+            continue
+        viz.seed_from_history(symbol, df.to_dict(orient="records"))
+        # Seed the latest Rvol from the most recent historical 2-min row so
+        # the "Rvol > 3" check has a value immediately -- we don't have to
+        # wait for the first live 2-min candle to finalize. Live finalizes
+        # will keep overwriting this via record_rvol as the day progresses.
+        if "Rvol" in df.columns:
+            viz.record_rvol(symbol, float(df.iloc[-1]["Rvol"]))
+    logging.info(
+        "ORB dashboard seeded with historical 2-min candles for %d symbols",
+        sum(1 for df in relatr_datasets.values() if df is not None and not df.empty),
+    )
+
+    # --- Seed yesterday's RTH high + close from the daily fetch. The daily
+    # data was pulled with useRTH=True and durationStr='14 D' ending
+    # yesterday, so the LAST row per symbol is yesterday's regular-hours
+    # session -- premarket is naturally excluded. Used by the dashboard's
+    # setup-validation checkboxes below the chart.
+    for df in daily_data:
+        if df is None or df.empty:
+            continue
+        symbol = df["Symbol"].iloc[0]
+        yrow = df.iloc[-1]
+        viz.record_yesterday_daily(
+            symbol=symbol,
+            high=float(yrow["High"]),
+            close=float(yrow["Close"]),
+        )
 
     # --- Determine and log dropped tickers ---
     dropped_tickers = [t for t in tickers if t not in valid_tickers]

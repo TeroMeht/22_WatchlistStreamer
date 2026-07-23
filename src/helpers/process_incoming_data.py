@@ -12,7 +12,10 @@ from .utils import *
 from .ibclient import *
 
 from src.strategies import *
+from src.entry_strategies_realtime import notify_live_candle_inserted
+from src.visualization import orb_state as viz
 from src.core.config import settings
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
@@ -71,6 +74,23 @@ async def finalize_candle(last_candle,
     db_ready_candle = enforce_candle_row_types(last_candle)  # Ensure all floats
     logger.info(f"Finalized candle for {symbol} at {last_candle.time}: O={last_candle.open}, H={last_candle.high}, L={last_candle.low}, C={last_candle.close}, V={last_candle.volume}, VWAP={last_candle.vwap}, EMA9={last_candle.ema9}, RelatR={last_candle.relatR}, AvgVol={last_candle.avg_volume}, RVol={last_candle.rvol}")
     await insert_candlestick_row(db_ready_candle)
+    # Tell realtime strategies (ORB) that a live-inserted 2-min candle now
+    # exists for this symbol. Without this, ORB would fire against the
+    # historical rows loaded into the livestream table at startup.
+    notify_live_candle_inserted(symbol)
+    # Append the finalized 2-min candle to the dashboard series and clear
+    # the in-progress candle at the same interval.
+    viz.record_finalized_2min_candle(
+        symbol=symbol,
+        candle_dt=datetime.combine(db_ready_candle.date, db_ready_candle.time),
+        open_=db_ready_candle.open,
+        high=db_ready_candle.high,
+        low=db_ready_candle.low,
+        close=db_ready_candle.close,
+    )
+    # Push the just-computed Rvol into the dashboard for the
+    # setup-validation checkbox (Rvol > 3).
+    viz.record_rvol(symbol, db_ready_candle.rvol)
     # NOTE: the frontend live table now polls /api/livestream/latest on a
     # 10s interval, so we no longer push each finalized candle to FastAPI.
     await run_strategies(last_candle)

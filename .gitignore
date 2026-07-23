@@ -17,3 +17,6 @@ __pycache__/
 *$py.class
 
 tickers/
+
+# Dashboard access log
+dashboard_access.log

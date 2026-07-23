@@ -549,6 +549,35 @@ async def insert_order(candle: CandleRow, stop_level: float):
             await pool.release(conn)
 
 
+async def has_active_order(symbol: str) -> bool:
+    """
+    Return True if ``symbol`` already has at least one row in ``orders``
+    with ``Status = 'active'``. Used by entry strategies to avoid stacking
+    multiple open positions on the same ticker: strategies should skip
+    firing when this returns True.
+
+    Returns False on any query error -- callers treat a DB hiccup as
+    "no known open order" so a real breakout still gets a chance to
+    reach the DB, and duplicate protection resumes as soon as the DB is
+    reachable again. Flip this behaviour if you'd rather fail closed.
+    """
+    pool = get_db_pool()
+    conn = await pool.acquire()
+    try:
+        row = await conn.fetchrow(
+            'SELECT 1 FROM orders WHERE "Symbol" = $1 AND "Status" = $2 LIMIT 1;',
+            symbol,
+            "active",
+        )
+        return row is not None
+    except Exception:
+        logging.exception("has_active_order lookup failed for %s", symbol)
+        return False
+    finally:
+        if conn:
+            await pool.release(conn)
+
+
 async def alarm_exists_recently(candle: CandleRow, alarm_message: str, cutoff_minutes) -> bool:
     # Get database connection from pool
     pool = get_db_pool()
