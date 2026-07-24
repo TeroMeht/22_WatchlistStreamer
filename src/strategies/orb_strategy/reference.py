@@ -53,17 +53,22 @@ class ReferenceLevel:
     """
     Immutable snapshot of the 16:32 opening-range candle for one symbol
     on one date.
-      * ``ref_close`` -- breakout level (bar must close above this to fire)
-      * ``ref_low``   -- stop anchor; stop = ref_low - ORB_STOP_OFFSET
-      * ``ref_open``  -- candle body reference, used by the green-candle
-                          filter (passes when ``ref_close > ref_open``)
+      * ``ref_close``  -- breakout level (bar must close above this to fire)
+      * ``ref_low``    -- stop anchor; stop = ref_low - ORB_STOP_OFFSET
+      * ``ref_open``   -- candle body reference, used by the green-candle
+                           filter (passes when ``ref_close > ref_open``)
+      * ``ref_field``  -- which OHLC field of the source candle became the
+                           breakout level; one of "open"/"high"/"low"/"close".
+                           Rendered on the chart label as
+                           ``"<ref_field> <ref_time> <ref_close>"``.
     """
     symbol: str
     ref_date: date
-    ref_time: time      # the reference candle's Time (16:32 in production)
-    ref_open: float     # 16:32 candle Open
-    ref_close: float    # 16:32 candle Close (breakout level)
-    ref_low: float      # 16:32 candle Low (stop anchor)
+    ref_time: time      # the source candle's Time (16:32 in production)
+    ref_open: float     # source candle Open
+    ref_close: float    # breakout level value
+    ref_low: float      # stop anchor value
+    ref_field: str      # "open" | "high" | "low" | "close"
 
 
 # In-memory cache keyed by uppercase symbol.
@@ -94,13 +99,15 @@ async def _fetch_reference_row(symbol: str, day: date) -> Optional[ReferenceLeve
     row = await get_livestream_row_at_time(symbol, day, REFERENCE_TIME)
     if row is None:
         return None
+    ref_t = row["Time"]
     return ReferenceLevel(
         symbol=symbol.upper(),
         ref_date=day,
-        ref_time=row["Time"],
+        ref_time=ref_t,
         ref_open=float(row["Open"]),
         ref_close=float(row["Close"]),
         ref_low=float(row["Low"]),
+        ref_field="close",
     )
 
 
@@ -155,15 +162,21 @@ async def _get_reference_from_last_two_candles(symbol: str) -> Optional[SimpleNa
     if df_last.empty or len(df_last) < 2:
         return None
     # get_last_rows orders ascending by Date, Time -- iloc[-1] is newest.
-    highest = float(df_last["High"].max())
+    # Identify which of the two candles owns the max High; the label on
+    # the chart will point at THAT candle's timestamp so the user can see
+    # exactly which bar the breakout level came from.
+    idx_max_high = df_last["High"].idxmax()
+    source_row = df_last.loc[idx_max_high]
+    highest = float(source_row["High"])
     lowest = float(df_last["Low"].min())
     newest = df_last.iloc[-1]
     return SimpleNamespace(
         symbol=symbol.upper(),
-        ref_time=newest["Time"],
-        ref_open=float(newest["Open"]),   # trigger-candle open, for green-candle filter
-        ref_close=highest,                 # legacy attribute name; here it's "level to watch"
+        ref_time=source_row["Time"],       # timestamp of the max-high candle
+        ref_open=float(newest["Open"]),    # trigger-candle open, for green-candle filter
+        ref_close=highest,                  # legacy attribute name; here it's "level to watch"
         ref_low=lowest,
+        ref_field="high",
     )
 
 

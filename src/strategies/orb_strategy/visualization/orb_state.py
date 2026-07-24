@@ -68,6 +68,7 @@ class SymbolState:
     ref_time: Optional[str] = None
     ref_close: Optional[float] = None
     ref_low: Optional[float] = None
+    ref_field: Optional[str] = None   # "open" | "high" | "low" | "close"
     has_active_order: bool = False
     last_bar_time: Optional[str] = None
     last_bar_close: Optional[float] = None
@@ -104,6 +105,7 @@ class SymbolState:
             "ref_time": self.ref_time,
             "ref_close": self.ref_close,
             "ref_low": self.ref_low,
+            "ref_field": self.ref_field,
             "has_active_order": self.has_active_order,
             "last_bar_time": self.last_bar_time,
             "last_bar_close": self.last_bar_close,
@@ -224,11 +226,18 @@ def record_finalized_2min_candle(
     st.updated_at = _now_iso()
 
 
-def record_reference(symbol: str, ref_time: dt_time, ref_close: float, ref_low: float) -> None:
+def record_reference(
+    symbol: str,
+    ref_time: dt_time,
+    ref_close: float,
+    ref_low: float,
+    field: Optional[str] = None,
+) -> None:
     st = _get(symbol)
     st.ref_time = ref_time.isoformat(timespec="seconds") if hasattr(ref_time, "isoformat") else str(ref_time)
     st.ref_close = float(ref_close)
     st.ref_low = float(ref_low)
+    st.ref_field = field
     st.updated_at = _now_iso()
 
 

@@ -159,6 +159,7 @@ function createCard(sym) {
     lastRefClose: null,
     lastRefLow: null,
     lastRefTime: null,
+    lastRefField: null,
     lastStopDrawn: null,
     lastFireCount: -1,
     lastBarTs: 0,
@@ -245,19 +246,22 @@ function updateChart(card, sym) {
   // recreated every poll so it can never go stale, and it appears the
   // instant the reference becomes available.
   if (sym.ref_close != null) {
-    if (sym.ref_close !== card.lastRefClose || sym.ref_time !== card.lastRefTime) {
+    if (sym.ref_close !== card.lastRefClose || sym.ref_time !== card.lastRefTime || sym.ref_field !== card.lastRefField) {
       if (card.breakoutLine) card.series.removePriceLine(card.breakoutLine);
-      const refT = sym.ref_time ? (' @ ' + sym.ref_time) : '';
+      // Compact HH:MM form for the label; ref_time comes in as ISO "HH:MM:SS".
+      const t = sym.ref_time ? sym.ref_time.slice(0, 5) : '';
+      const field = sym.ref_field || 'ref';
       card.breakoutLine = card.series.createPriceLine({
         price: sym.ref_close,
         color: '#d85a30',
         lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Solid,
         axisLabelVisible: true,
-        title: 'REF' + refT + '  ' + sym.ref_close.toFixed(2),
+        title: field + ' ' + t + ' ',
       });
       card.lastRefClose = sym.ref_close;
       card.lastRefTime = sym.ref_time;
+      card.lastRefField = sym.ref_field;
     }
   } else if (card.breakoutLine) {
     // Reference disappeared (e.g. livestream table truncated). Clear the
@@ -266,6 +270,7 @@ function updateChart(card, sym) {
     card.breakoutLine = null;
     card.lastRefClose = null;
     card.lastRefTime = null;
+    card.lastRefField = null;
   }
 
   // Stop price line -- only drawn AFTER a breakout has fired. Anchored to

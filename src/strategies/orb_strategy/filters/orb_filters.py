@@ -105,7 +105,7 @@ async def check_reference_candle_green(ref) -> FilterResult:
 async def run_all_filters(symbol: str, current_price: float, ref) -> List[FilterResult]:
     return [
         await check_reference_candle_green(ref),
-    #    await check_rvol_gte(symbol, settings.ORB_MIN_RVOL),
+        await check_rvol_gte(symbol, settings.ORB_MIN_RVOL),
         await check_price_above_yesterday_high(symbol, current_price),
         await check_price_above_yesterday_close(symbol, current_price),
     ]
