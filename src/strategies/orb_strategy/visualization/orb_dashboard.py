@@ -33,13 +33,6 @@ logger = logging.getLogger(__name__)
 DASHBOARD_PORT: int = 8790
 DASHBOARD_HOST: str = "127.0.0.1"
 
-# Access log for GET /api/state and GET / is noisy (12 hits/minute per open
-# tab). We keep it, but route it away from the main streamer log so those
-# lines don't drown out the strategy output. Points at the working
-# directory; tail with `tail -f dashboard_access.log` in a second terminal
-# if you want to watch it.
-DASHBOARD_ACCESS_LOG_PATH: str = "dashboard_access.log"
-
 
 _DASHBOARD_HTML = r"""<!doctype html>
 <html lang="en">
@@ -353,33 +346,6 @@ poll();
 
 
 _runner = None
-_access_log_configured: bool = False
-
-
-def _get_isolated_access_logger() -> logging.Logger:
-    """
-    Return the ``aiohttp.access`` logger with a dedicated FileHandler,
-    propagation to root disabled, and no console handlers. Idempotent --
-    reruns are no-ops. Result: aiohttp writes GET lines to
-    ``DASHBOARD_ACCESS_LOG_PATH`` and nowhere else.
-    """
-    global _access_log_configured
-    access = logging.getLogger("aiohttp.access")
-    if _access_log_configured:
-        return access
-
-    # Silence the console: setup_logging attaches a StreamHandler at the
-    # root logger; propagation False stops aiohttp.access from reaching it.
-    access.propagate = False
-    access.setLevel(logging.INFO)
-
-    handler = logging.FileHandler(DASHBOARD_ACCESS_LOG_PATH, encoding="utf-8")
-    handler.setFormatter(
-        logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-    )
-    access.addHandler(handler)
-    _access_log_configured = True
-    return access
 
 
 async def start_dashboard(port: int = DASHBOARD_PORT) -> Optional[object]:
@@ -408,15 +374,12 @@ async def start_dashboard(port: int = DASHBOARD_PORT) -> Optional[object]:
     app.router.add_get("/", _index)
     app.router.add_get("/api/state", _state)
 
-    access_logger = _get_isolated_access_logger()
-
-    runner = web.AppRunner(app, access_log=access_logger)
+    # Silence aiohttp's per-request access log entirely; the request
+    # volume is high and the info isn't useful for this workflow.
+    runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, DASHBOARD_HOST, port)
     await site.start()
     _runner = runner
-    logger.info(
-        "ORB dashboard live at http://%s:%d  (access log -> %s)",
-        DASHBOARD_HOST, port, DASHBOARD_ACCESS_LOG_PATH,
-    )
+    logger.info("ORB dashboard live at http://%s:%d", DASHBOARD_HOST, port)
     return runner

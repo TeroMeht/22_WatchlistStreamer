@@ -18,5 +18,5 @@ __pycache__/
 
 tickers/
 
-# Dashboard access log
-dashboard_access.log
+# 5-sec bar log
+bars_5s.log

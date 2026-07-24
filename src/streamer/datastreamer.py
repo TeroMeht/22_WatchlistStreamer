@@ -1,6 +1,6 @@
 
 from src.helpers.ibclient import monitor_tickers
-from src.database.db_functions import delete_all_tables_db_async
+from src.database.db_functions import archive_livestream_tables, delete_all_tables_db_async
 from src.alarms.send_postrequest import send_streamer_status
 import asyncio
 import logging
@@ -48,6 +48,10 @@ async def run_streamer(ib):
     # if aiohttp isn't installed -- start_dashboard logs and returns None.
     await start_dashboard()
 
+    # Archive every existing *_livestream row into bars_2m_archive BEFORE
+    # the startup wipe -- so historical + previous-session live bars are
+    # kept for later comparison against bars_5s.log.
+    await archive_livestream_tables()
     await delete_all_tables_db_async()
 
     # --- Load watchlist + per-ticker strategy selection from DB --------------

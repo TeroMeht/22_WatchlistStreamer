@@ -16,6 +16,83 @@ logger = logging.getLogger(__name__)  # module-specific logger
 
 
 
+async def archive_livestream_tables() -> None:
+    """
+    Copy every row from all ``*_livestream`` tables into a single
+    long-lived ``bars_2m_archive`` table, then let the caller drop the
+    per-symbol livestream tables.
+
+    Called from ``run_streamer`` right BEFORE ``delete_all_tables_db_async``
+    so historical + previous-session live bars survive the startup wipe.
+    Idempotent: the ``(Symbol, Date, Time)`` unique constraint plus
+    ``ON CONFLICT DO NOTHING`` means re-runs never dupe rows.
+
+    The archive is the long-term store you can join against ``bars_5s.log``
+    later (e.g. reconstruct 2-min candles from the 5s log and check they
+    match rows here).
+    """
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        # Ensure archive table exists. Same column list as the per-symbol
+        # livestream tables so INSERT ... SELECT is straightforward.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS bars_2m_archive (
+                "Symbol" TEXT NOT NULL,
+                "Date" DATE NOT NULL,
+                "Time" TIME NOT NULL,
+                "Open" NUMERIC(10, 2),
+                "High" NUMERIC(10, 2),
+                "Low" NUMERIC(10, 2),
+                "Close" NUMERIC(10, 2),
+                "Volume" NUMERIC(18, 2),
+                "VWAP" NUMERIC(10, 2),
+                "EMA9" NUMERIC(10, 2),
+                "Avg_volume" NUMERIC(18, 2),
+                "Rvol" NUMERIC(10, 2),
+                "Relatr" NUMERIC(10, 2),
+                UNIQUE ("Symbol", "Date", "Time")
+            );
+        """)
+
+        # Discover every existing per-symbol livestream table.
+        tables = await conn.fetch("""
+            SELECT tablename FROM pg_tables
+            WHERE schemaname = 'public' AND tablename LIKE '%_livestream';
+        """)
+        if not tables:
+            logging.info("archive_livestream_tables: no *_livestream tables to archive")
+            return
+
+        total_new_rows = 0
+        for r in tables:
+            tname = r["tablename"]
+            try:
+                result = await conn.execute(f"""
+                    INSERT INTO bars_2m_archive (
+                        "Symbol", "Date", "Time", "Open", "High", "Low", "Close",
+                        "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr"
+                    )
+                    SELECT
+                        "Symbol", "Date", "Time", "Open", "High", "Low", "Close",
+                        "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr"
+                    FROM "{tname}"
+                    ON CONFLICT ("Symbol", "Date", "Time") DO NOTHING;
+                """)
+                # asyncpg returns "INSERT 0 <count>"; last token is affected rows.
+                new_rows = int(result.split()[-1]) if result else 0
+                total_new_rows += new_rows
+                logging.info("archive_livestream_tables: %-40s -> %d new rows",
+                             tname, new_rows)
+            except Exception:
+                logging.exception(
+                    "archive_livestream_tables: failed archiving %s", tname,
+                )
+        logging.info(
+            "archive_livestream_tables: %d new rows across %d livestream tables",
+            total_new_rows, len(tables),
+        )
+
+
 async def delete_all_tables_db_async() -> None:
     try:
         pool = get_db_pool()
