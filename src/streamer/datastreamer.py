@@ -21,6 +21,7 @@ from src.database.watchlist import load_watchlist, create_watchlist_tables
 from src.database.exit_requests import load_armed_exit_strategies
 from src.visualization.orb_dashboard import start_dashboard
 from src.visualization import orb_state as viz
+from src.strategies.orb_strategy import state as orb_strategy_state
 from src.core.config import settings
 
 
@@ -161,11 +162,13 @@ async def run_streamer(ib):
             continue
         symbol = df["Symbol"].iloc[0]
         yrow = df.iloc[-1]
-        viz.record_yesterday_daily(
-            symbol=symbol,
-            high=float(yrow["High"]),
-            close=float(yrow["Close"]),
-        )
+        yhi = float(yrow["High"])
+        ycl = float(yrow["Close"])
+        # Two sinks: the dashboard (for the checkbox rows) and the strategy
+        # state (for the yesterday-level filters). Both are cheap in-memory
+        # writes; keeping them separate preserves the strategy/viz split.
+        viz.record_yesterday_daily(symbol=symbol, high=yhi, close=ycl)
+        orb_strategy_state.record_yesterday_daily(symbol=symbol, high=yhi, close=ycl)
 
     # --- Determine and log dropped tickers ---
     dropped_tickers = [t for t in tickers if t not in valid_tickers]

@@ -247,23 +247,32 @@ function updateChart(card, sym) {
     }
   }
 
-  // Level to watch (ref_close). Redraw whenever either the price or the
-  // reference candle's timestamp changes -- in test mode the ref rolls
-  // forward every 2 minutes and the label needs to follow.
-  if (sym.ref_close != null &&
-      (sym.ref_close !== card.lastRefClose || sym.ref_time !== card.lastRefTime)) {
-    if (card.breakoutLine) card.series.removePriceLine(card.breakoutLine);
-    const refT = sym.ref_time ? (' ' + sym.ref_time) : '';
-    card.breakoutLine = card.series.createPriceLine({
-      price: sym.ref_close,
-      color: '#d85a30',
-      lineWidth: 2,
-      lineStyle: LightweightCharts.LineStyle.Solid,
-      axisLabelVisible: true,
-      title: 'level to watch' + refT,
-    });
-    card.lastRefClose = sym.ref_close;
-    card.lastRefTime = sym.ref_time;
+  // Level to watch = ref_close. In test mode this is max(High) of the last
+  // two 2-min candles; in production it's the 16:32 close. Line is
+  // recreated every poll so it can never go stale, and it appears the
+  // instant the reference becomes available.
+  if (sym.ref_close != null) {
+    if (sym.ref_close !== card.lastRefClose || sym.ref_time !== card.lastRefTime) {
+      if (card.breakoutLine) card.series.removePriceLine(card.breakoutLine);
+      const refT = sym.ref_time ? (' @ ' + sym.ref_time) : '';
+      card.breakoutLine = card.series.createPriceLine({
+        price: sym.ref_close,
+        color: '#d85a30',
+        lineWidth: 2,
+        lineStyle: LightweightCharts.LineStyle.Solid,
+        axisLabelVisible: true,
+        title: 'REF' + refT + '  ' + sym.ref_close.toFixed(2),
+      });
+      card.lastRefClose = sym.ref_close;
+      card.lastRefTime = sym.ref_time;
+    }
+  } else if (card.breakoutLine) {
+    // Reference disappeared (e.g. livestream table truncated). Clear the
+    // stale line so the chart doesn't lie.
+    card.series.removePriceLine(card.breakoutLine);
+    card.breakoutLine = null;
+    card.lastRefClose = null;
+    card.lastRefTime = null;
   }
 
   // Stop price line -- only drawn AFTER a breakout has fired. Anchored to
