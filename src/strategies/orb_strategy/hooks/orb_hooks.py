@@ -1,7 +1,7 @@
 """
 Visualization hooks for the ORB long strategy.
 
-Wraps every ``src.visualization.orb_state.record_*`` call the strategy
+Wraps every ``orb_strategy.visualization.orb_state.record_*`` call the strategy
 needs so the strategy body doesn't import ``viz`` directly. This is the
 seam that lets us swap the visualization backend later (websocket,
 different store, no-op for tests) without touching strategy logic.
@@ -15,7 +15,7 @@ from datetime import datetime
 
 from ib_async import RealTimeBar
 
-from src.visualization import orb_state as viz
+from ..visualization import orb_state as viz
 
 
 def on_bar(symbol: str, bar_time_local: datetime, bar: RealTimeBar) -> None:
@@ -30,25 +30,8 @@ def on_bar(symbol: str, bar_time_local: datetime, bar: RealTimeBar) -> None:
     )
 
 
-def on_warming_up(symbol: str) -> None:
-    viz.record_state(symbol, viz.STATE_WARMING_UP)
-
-
 def on_reference(symbol: str, ref: object) -> None:
     viz.record_reference(symbol, ref.ref_time, ref.ref_close, ref.ref_low)
-
-
-def on_muted(symbol: str) -> None:
-    viz.record_active_order(symbol, True)
-    viz.record_state(symbol, viz.STATE_MUTED)
-
-
-def on_active_order_cleared(symbol: str) -> None:
-    viz.record_active_order(symbol, False)
-
-
-def on_searching(symbol: str) -> None:
-    viz.record_state(symbol, viz.STATE_SEARCHING)
 
 
 def on_breakout(symbol: str) -> None:

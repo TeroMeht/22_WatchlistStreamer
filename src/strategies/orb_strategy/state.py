@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from src.visualization import orb_state as viz
+from .visualization import orb_state as viz
 
 
 
@@ -38,3 +38,21 @@ def yesterday_high(symbol: str) -> Optional[float]:
 def yesterday_close(symbol: str) -> Optional[float]:
     d = _yesterday_daily.get(symbol.upper())
     return d["close"] if d else None
+
+
+# --- One-shot fire latch -----------------------------------------------------
+# Once ORB fires for a symbol we latch it for the rest of the session --
+# no more fires until the streamer is restarted. Process-scoped in
+# memory; restart wipes it, which is the whole point (restart = fresh
+# permission to fire).
+_fired_this_session: dict[str, bool] = {}
+
+
+def mark_fired(symbol: str) -> None:
+    """Latch ``symbol`` so ORB will not fire again until streamer restart."""
+    _fired_this_session[symbol.upper()] = True
+
+
+def has_fired(symbol: str) -> bool:
+    """True if ORB has already fired for ``symbol`` in this session."""
+    return _fired_this_session.get(symbol.upper(), False)

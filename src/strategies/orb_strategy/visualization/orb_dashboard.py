@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from src.visualization import orb_state
+from . import orb_state
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,7 @@ function updateChart(card, sym) {
       card.breakoutLine = card.series.createPriceLine({
         price: sym.ref_close,
         color: '#d85a30',
-        lineWidth: 2,
+        lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Solid,
         axisLabelVisible: true,
         title: 'REF' + refT + '  ' + sym.ref_close.toFixed(2),

@@ -3,7 +3,8 @@ import pandas as pd
 from src.common.calculate import *
 from src.helpers.handle_candles import *
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
+from typing import Optional
 import logging
 
 from src.helpers.utils import *
@@ -435,6 +436,39 @@ async def get_last_rows(table_name:str, num_rows:int):
             await pool.release(conn)
 
 
+async def get_livestream_row_at_time(
+    symbol: str, day: date, at_time: time,
+) -> Optional[dict]:
+    """
+    Fetch a single row from ``{symbol}_livestream`` for the given
+    ``(Date, Time)`` pair. Returns a dict of all columns (asyncpg Record
+    coerced via ``dict()``), or ``None`` if no row exists or the query
+    errored. Errors are logged; callers get ``None`` and can retry.
+    """
+    table_name = f"{symbol.lower()}_livestream"
+    query = f"""
+        SELECT * FROM "{table_name}"
+        WHERE "Date" = $1 AND "Time" = $2
+        LIMIT 1;
+    """
+    pool = get_db_pool()
+    conn = await pool.acquire()
+    try:
+        row = await conn.fetchrow(query, day, at_time)
+    except Exception:
+        logging.exception(
+            "get_livestream_row_at_time: failed for %s at %s on %s",
+            table_name, at_time, day,
+        )
+        return None
+    finally:
+        if conn:
+            await pool.release(conn)
+
+    if row is None:
+        return None
+    return dict(row)
+
 
 async def create_alarms_table(db_conn: asyncpg.Connection) -> None:
     """
@@ -549,33 +583,6 @@ async def insert_order(candle: CandleRow, stop_level: float):
             await pool.release(conn)
 
 
-async def has_active_order(symbol: str) -> bool:
-    """
-    Return True if ``symbol`` already has at least one row in ``orders``
-    with ``Status = 'active'``. Used by entry strategies to avoid stacking
-    multiple open positions on the same ticker: strategies should skip
-    firing when this returns True.
-
-    Returns False on any query error -- callers treat a DB hiccup as
-    "no known open order" so a real breakout still gets a chance to
-    reach the DB, and duplicate protection resumes as soon as the DB is
-    reachable again. Flip this behaviour if you'd rather fail closed.
-    """
-    pool = get_db_pool()
-    conn = await pool.acquire()
-    try:
-        row = await conn.fetchrow(
-            'SELECT 1 FROM orders WHERE "Symbol" = $1 AND "Status" = $2 LIMIT 1;',
-            symbol,
-            "active",
-        )
-        return row is not None
-    except Exception:
-        logging.exception("has_active_order lookup failed for %s", symbol)
-        return False
-    finally:
-        if conn:
-            await pool.release(conn)
 
 
 async def alarm_exists_recently(candle: CandleRow, alarm_message: str, cutoff_minutes) -> bool:

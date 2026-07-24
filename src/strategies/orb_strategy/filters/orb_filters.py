@@ -81,11 +81,32 @@ async def check_price_above_yesterday_close(symbol: str, current_price: float) -
     return FilterResult(True, f"price={current_price:.2f} > yclose={ycl:.2f}")
 
 
-async def run_all_filters(symbol: str, current_price: float) -> List[FilterResult]:
-     return [
-    #     await check_rvol_gte(symbol, ORB_MIN_RVOL),
-    #     await check_price_above_yesterday_high(symbol, current_price),
-    #     await check_price_above_yesterday_close(symbol, current_price),
+async def check_reference_candle_green(ref) -> FilterResult:
+    """
+    Pass when the reference candle's Close is higher than its Open (a
+    "green" candle body). Signals bullish structure in the opening
+    range. Takes the reference object rather than symbol -- everything
+    needed is already on ``ref`` (both ReferenceLevel dataclass and the
+    test-mode SimpleNamespace expose ``.ref_open`` and ``.ref_close``),
+    so no DB round-trip.
+    """
+    if ref.ref_close > ref.ref_open:
+        return FilterResult(
+            True,
+            f"green candle: close={ref.ref_close:.2f} > open={ref.ref_open:.2f}",
+        )
+    return FilterResult(
+        False,
+        f"not green: close={ref.ref_close:.2f} <= open={ref.ref_open:.2f}",
+    )
+
+
+async def run_all_filters(symbol: str, current_price: float, ref) -> List[FilterResult]:
+    return [
+        await check_reference_candle_green(ref),
+    #    await check_rvol_gte(symbol, ORB_MIN_RVOL),
+    #    await check_price_above_yesterday_high(symbol, current_price),
+    #    await check_price_above_yesterday_close(symbol, current_price),
     ]
 
 
