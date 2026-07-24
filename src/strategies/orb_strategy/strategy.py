@@ -30,7 +30,6 @@ from ib_async import RealTimeBar
 from src.core.config import settings
 
 from .actions.orb_actions import bar_to_candle_row, fire_signal
-from .config import ORB_STOP_OFFSET
 from .filters.orb_filters import run_all_filters, format_filter_results
 from .hooks import orb_hooks as hooks
 from .reference import select_reference
@@ -145,7 +144,7 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
         hooks.on_breakout(symbol)
 
         # --- Phase 4: fire ------------------------------------------------------
-        stop_level = round(ref.ref_low - ORB_STOP_OFFSET, 2)
+        stop_level = round(ref.ref_low - settings.ORB_STOP_OFFSET, 2)
         logger.info(
             "ORB long breakout FIRED: %s -- LIVE 5s bar %s close=%.2f > "
             "REF 2m candle %s close=%.2f (ref_low=%.2f, stop=%.2f) [%s]",

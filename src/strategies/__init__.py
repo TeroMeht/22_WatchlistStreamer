@@ -10,7 +10,7 @@ from typing import Dict, Set
 
 from src.exit_strategies import *
 from src.entry_strategies import *
-from src.strategies.orb_strategy import orb_breakout_long
+from src.strategies.orb_strategy.strategy import orb_breakout_long
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)

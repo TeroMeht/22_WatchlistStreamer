@@ -31,10 +31,9 @@ from dataclasses import dataclass
 from datetime import date, time
 from types import SimpleNamespace
 from typing import Optional, Tuple
-
+from src.core.config import settings
 from src.database.db_functions import get_last_rows, get_livestream_row_at_time
 
-from .config import ORB_TEST_MODE_USE_LAST_CANDLE
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +179,6 @@ async def select_reference(symbol: str, today: date) -> Tuple[Optional[object], 
     production, or fewer than 2 candles in test mode). ``label`` is a
     short string for logging.
     """
-    if ORB_TEST_MODE_USE_LAST_CANDLE:
+    if settings.ORB_TEST_MODE_USE_LAST_CANDLE:
         return await _get_reference_from_last_two_candles(symbol), "LAST-2-CANDLES (test mode)"
     return await get_reference_level(symbol, today), "16:32"
