@@ -3,7 +3,9 @@ from datetime import date, time, datetime
 import logging
 # candlestore.py
 from collections import defaultdict, deque
+from datetime import datetime
 
+from ib_async import RealTimeBar
 
 logger = logging.getLogger(__name__)  # module-specific logger
 
@@ -81,4 +83,26 @@ def enforce_candle_row_types(candle: CandleRow) -> CandleRow:
     )
 
 
-
+def stream_data_to_candle_row(symbol: str, bar: RealTimeBar, bar_time_local: datetime) -> CandleRow:
+    """
+    Minimal CandleRow synthesized from a 5-sec bar. Indicator fields
+    (vwap/ema9/relatR/rvol/avg_volume) aren't meaningful for a 5-sec
+    bar so we zero them; only symbol/date/time/close matter for the
+    downstream alarm + order writers.
+    """
+    close_px = float(bar.close)
+    return CandleRow(
+        symbol=symbol,
+        date=bar_time_local.date(),
+        time=bar_time_local.time(),
+        open=close_px,
+        high=close_px,
+        low=close_px,
+        close=close_px,
+        volume=float(bar.volume),
+        vwap=0.0,
+        ema9=0.0,
+        avg_volume=0.0,
+        rvol=0.0,
+        relatR=0.0,
+    )

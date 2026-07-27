@@ -18,8 +18,7 @@ from __future__ import annotations
 import logging
 
 from src.core.config import settings
-from typing import NamedTuple
-from typing import List
+from typing import List, NamedTuple
 from src.database.db_functions import get_last_rows
 
 from ..state import yesterday_close, yesterday_high
@@ -82,30 +81,29 @@ async def check_price_above_yesterday_close(symbol: str, current_price: float) -
     return FilterResult(True, f"price={current_price:.2f} > yclose={ycl:.2f}")
 
 
-async def check_reference_candle_green(ref) -> FilterResult:
+async def check_reference_candle_green(breakout_level) -> FilterResult:
     """
     Pass when the reference candle's Close is higher than its Open (a
     "green" candle body). Signals bullish structure in the opening
-    range. Takes the reference object rather than symbol -- everything
-    needed is already on ``ref`` (both ReferenceLevel dataclass and the
-    test-mode SimpleNamespace expose ``.ref_open`` and ``.ref_close``),
-    so no DB round-trip.
+    range. Takes the breakout-level object rather than symbol --
+    everything needed is already on it (``.ref_open`` and
+    ``.ref_close``), so no DB round-trip.
     """
-    if ref.ref_close > ref.ref_open:
+    if breakout_level.ref_close > breakout_level.ref_open:
         return FilterResult(
             True,
-            f"green candle: close={ref.ref_close:.2f} > open={ref.ref_open:.2f}",
+            f"green candle: close={breakout_level.ref_close:.2f} > open={breakout_level.ref_open:.2f}",
         )
     return FilterResult(
         False,
-        f"not green: close={ref.ref_close:.2f} <= open={ref.ref_open:.2f}",
+        f"not green: close={breakout_level.ref_close:.2f} <= open={breakout_level.ref_open:.2f}",
     )
 
 
-async def run_all_filters(symbol: str, current_price: float, ref) -> List[FilterResult]:
+async def run_all_filters(symbol: str, current_price: float, breakout_level) -> List[FilterResult]:
     return [
-        await check_reference_candle_green(ref),
-        await check_rvol_gte(symbol, settings.ORB_MIN_RVOL),
+        #await check_reference_candle_green(breakout_level),
+        #await check_rvol_gte(symbol, settings.ORB_MIN_RVOL),
         await check_price_above_yesterday_high(symbol, current_price),
         await check_price_above_yesterday_close(symbol, current_price),
     ]
@@ -117,3 +115,27 @@ def format_filter_results(results: List[FilterResult]) -> str:
     if not failed:
         return "filters PASS (" + "; ".join(r.reason for r in results) + ")"
     return "filter miss: " + "; ".join(r.reason for r in failed)
+
+
+async def evaluate_filters(
+    symbol: str,
+    current_price: float,
+    breakout_level,
+    bar_time_local,
+) -> bool:
+    """
+    Run all setup filters and handle the miss-log path here so callers
+    don't have to branch. Returns ``True`` when every filter passed,
+    ``False`` if any failed -- in which case a compact one-line miss
+    summary is logged before returning. Callers should treat ``False``
+    as "skip breakout for this bar".
+    """
+    filter_results = await run_all_filters(symbol, current_price, breakout_level)
+    if not all(r.passed for r in filter_results):
+        logger.info(
+            "ORB long: %s -- %s (LIVE 5s bar %s close=%.2f | LEVEL close=%.2f)",
+            symbol, format_filter_results(filter_results),
+            bar_time_local.time(), current_price, breakout_level.ref_close,
+        )
+        return False
+    return True

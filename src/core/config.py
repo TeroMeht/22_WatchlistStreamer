@@ -32,8 +32,6 @@ class Settings(BaseSettings):
     # ORB strategy parameters
     ORB_STOP_OFFSET: float
     ORB_MIN_RVOL: float
-    ORB_TEST_MODE_USE_LAST_CANDLE: bool
-
 
     TIMEZONE: str
     EXIT_REQUEST_ENDPOINT: str

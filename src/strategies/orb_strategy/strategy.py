@@ -7,8 +7,8 @@ modules; the breakout predicate lives inline just above the orchestrator
 so the fire path reads top-to-bottom.
 
 Fire semantics (current build):
-    * Reference must be available: the 16:32 candle in production, or
-      at least two 2-min candles for the test-mode last-2-candles ref.
+    * Reference must be available: at least two 2-min candles in the
+      livestream table (see ``reference.get_reference_from_last_two_candles``).
     * ALL setup filters must pass on the current bar. If any filter
       fails, skip the breakout check entirely -- ``detect_breakout``
       is stateless so there's no crossing bookkeeping to preserve.
@@ -26,13 +26,13 @@ from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from ib_async import RealTimeBar
-
+from src.helpers.handle_candles import stream_data_to_candle_row
 from src.core.config import settings
 
-from .actions.orb_actions import bar_to_candle_row, fire_signal
-from .filters.orb_filters import run_all_filters, format_filter_results
+from .actions.orb_actions import fire_signal
+from .filters.orb_filters import evaluate_filters
 from .hooks import orb_hooks as hooks
-from .reference import select_reference
+from .reference import get_reference_from_last_two_candles
 from .state import has_fired, mark_fired
 
 logger = logging.getLogger(__name__)
@@ -52,45 +52,72 @@ class BreakoutEvent(NamedTuple):
     reason: str  # human-readable string for logging
 
 
-def detect_breakout(bar_close: float, ref_close: float) -> BreakoutEvent:
+def detect_breakout(livestream_last: float, breakout_level: float) -> BreakoutEvent:
     """True when ``bar_close`` is strictly above ``ref_close``."""
-    if bar_close > ref_close:
+    if livestream_last > breakout_level:
         return BreakoutEvent(
             True,
-            f"BREAKOUT (bar close {bar_close:.2f} > ref close {ref_close:.2f})",
+            f"BREAKOUT (bar close {livestream_last:.2f} > ref close {breakout_level:.2f})",
         )
     return BreakoutEvent(
         False,
-        f"no breakout yet (bar close {bar_close:.2f} <= ref close {ref_close:.2f})",
+        f"no breakout yet (bar close {livestream_last:.2f} <= ref close {breakout_level:.2f})",
     )
+
+
+
+
+
+
+async def _handle_possible_breakout(incoming_data_stream: RealTimeBar, symbol: str, breakout_level, bar_time_local) -> None:
+
+    # --- Phase 3: breakout detection ----------------------------------------
+    event = detect_breakout(float(incoming_data_stream.close), breakout_level.ref_close)
+
+    logger.info(
+        "ORB long: %s -- LiveStream last %s price=%.2f | Breakout level %s "
+        "price=%.2f low=%.2f | %s",
+        symbol,
+        bar_time_local.time(), float(incoming_data_stream.close),
+        breakout_level.ref_time, breakout_level.ref_close, breakout_level.ref_low,
+        event.reason,
+    )
+
+    if not event.is_breakout:
+        return
+
+    hooks.on_breakout(symbol)
+
+    # --- Phase 4: fire ------------------------------------------------------
+    stop_level = round(breakout_level.ref_low - settings.ORB_STOP_OFFSET, 2)
+    logger.info(
+        "ORB long breakout FIRED: %s -- LiveStream last %s price=%.2f > "
+        "Breakout level %s price=%.2f (low=%.2f, stop=%.2f)",
+        symbol,
+        bar_time_local.time(), float(incoming_data_stream.close),
+        breakout_level.ref_time, breakout_level.ref_close,
+        breakout_level.ref_low, stop_level,
+    )
+
+    candle = stream_data_to_candle_row(symbol, incoming_data_stream, bar_time_local)
+    await fire_signal(candle, stop_level)
+    hooks.on_fire(symbol, bar_time_local, float(incoming_data_stream.close), stop_level, breakout_level.ref_close)
+    # Latch the strategy for this symbol -- no further fires until restart.
+    mark_fired(symbol)
+
 
 
 # =============================================================================
 # Strategy orchestrator
 # =============================================================================
-
-
 async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
-    """
-    Fire a long alarm + entry order when the 5-sec ``bar`` closes above
-    the reference level (16:32 candle's Close in production, or the
-    highest High across the last two 2-min candles in test mode) with
-    all setup filters passing.
-    """
-    bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(
-        ZoneInfo(settings.TIMEZONE)
-    )
-    today = bar_time_local.date()
+
+    bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(settings.TIMEZONE))
 
     # Chart animates on every tick regardless of what branch we take below.
     hooks.on_bar(symbol, bar_time_local, bar)
 
-    # --- Session one-shot latch --------------------------------------------
-    # After a fire, silently skip everything for the rest of the session.
-    # The chart keeps animating candles (on_bar above) so the user can
-    # watch price action, but no reference / filter / breakout hook fires
-    # -- viz retains its last known ref_close, ref_low, and fire marker,
-    # so the "level to watch" and "stop" lines stay frozen in place.
+    # --- Session one-shot latch -------------------------------------------
     if has_fired(symbol):
         logger.debug(
             "ORB long: %s already fired this session -- latched until restart "
@@ -100,62 +127,22 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
         return
 
     # --- Phase 1: reference selection ---------------------------------------
-    # Test mode uses the high/low of the last two 2-min candles;
-    # production uses the cached 16:32 candle.
-    ref, ref_label = await select_reference(symbol, today)
-    if ref is None:
-        logger.debug("ORB long: %s -- %s reference not available yet "
+    breakout_level = await get_reference_from_last_two_candles(symbol)
+    # or with a custom window:
+    # breakout_level = await get_reference_from_opening_range(symbol, today, time(16, 30), time(16, 32))
+
+    if breakout_level is None:
+        logger.debug("ORB long: %s --reference not available yet "
                      "(LIVE 5s bar %s close=%.2f)",
-                     symbol, ref_label, bar_time_local.time(), float(bar.close))
+                     symbol,  bar_time_local.time(), float(bar.close))
         return
-    hooks.on_reference(symbol, ref)
-
-    # --- Phase 2: setup filters (ALL must pass) -----------------------------
-    # If any filter fails we log the miss reasons and return -- the
-    # breakout predicate is stateless so there's nothing to preserve.
-    filter_results = await run_all_filters(symbol, float(bar.close), ref)
     
-    if not all(r.passed for r in filter_results):
-        logger.info(
-            "ORB long: %s -- %s (LIVE 5s bar %s close=%.2f | REF close=%.2f)",
-            symbol, format_filter_results(filter_results),
-            bar_time_local.time(), float(bar.close), ref.ref_close,
-        )
-        return
+    hooks.on_reference(symbol, breakout_level)
 
-    # --- Phase 3: breakout detection ----------------------------------------
-    # Stateless: just compare bar close to ref close. Re-fire prevention
-    # is handled entirely by the session latch checked at the top of this
-    # function, so no crossing / continuation bookkeeping is needed here.
-    event = detect_breakout(float(bar.close), ref.ref_close)
+    # --- Phase 2: setup filters --------------------------------------------
+    filters_passed = await evaluate_filters(symbol, float(bar.close), breakout_level, bar_time_local)
 
-    logger.info(
-        "ORB long check: %s -- LIVE 5s bar %s close=%.2f | REF 2m candle %s "
-        "close=%.2f low=%.2f [%s] | %s -- %s",
-        symbol,
-        bar_time_local.time(), float(bar.close),
-        ref.ref_time, ref.ref_close, ref.ref_low,
-        ref_label,
-        format_filter_results(filter_results),
-        event.reason,
-    )
+    if filters_passed:
+        await _handle_possible_breakout(bar, symbol, breakout_level, bar_time_local)
 
-    if event.is_breakout:
-        hooks.on_breakout(symbol)
 
-        # --- Phase 4: fire ------------------------------------------------------
-        stop_level = round(ref.ref_low - settings.ORB_STOP_OFFSET, 2)
-        logger.info(
-            "ORB long breakout FIRED: %s -- LIVE 5s bar %s close=%.2f > "
-            "REF 2m candle %s close=%.2f (ref_low=%.2f, stop=%.2f) [%s]",
-            symbol,
-            bar_time_local.time(), float(bar.close),
-            ref.ref_time, ref.ref_close,
-            ref.ref_low, stop_level, ref_label,
-        )
-
-        candle = bar_to_candle_row(symbol, bar, bar_time_local)
-        await fire_signal(candle, stop_level)
-        hooks.on_fire(symbol, bar_time_local, float(bar.close), stop_level, ref.ref_close)
-        # Latch the strategy for this symbol -- no further fires until restart.
-        mark_fired(symbol)

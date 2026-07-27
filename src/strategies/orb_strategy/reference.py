@@ -1,175 +1,52 @@
 """
-Reference-candle selection for the ORB long strategy.
+Reference-candle builders for the ORB long strategy.
 
-Two modes:
-    * Production (``ORB_TEST_MODE_USE_LAST_CANDLE = False``): reference
-      is the 16:32 candle's CLOSE (the breakout level) with its LOW as
-      the stop anchor and its OPEN carried on the ref so filters can
-      inspect the candle body (e.g. green-candle filter). Cached
-      in-process per symbol per date; the first 5-sec bar arriving at
-      or after 16:34 triggers one DB read. If the row isn't written yet
-      we return ``None`` and try again on the next bar. Auto-invalidated
-      on date rollover.
-    * Test (``ORB_TEST_MODE_USE_LAST_CANDLE = True``): reference is
-      derived from the LAST TWO 2-min candles in ``{symbol}_livestream``:
-      the level to watch is ``max(High)`` of the two, the stop anchor
-      is ``min(Low)`` of the two, and ``ref_open`` is the Open of the
-      newer of the two (the trigger candle). Not cached.
+Two builders live here; the strategy imports and calls ONE of them
+directly:
 
-Both modes return an object exposing ``.symbol``, ``.ref_time``,
-``.ref_open``, ``.ref_close`` and ``.ref_low`` (a ``ReferenceLevel``
-dataclass in production, a ``SimpleNamespace`` in test mode). Callers
+    * ``get_reference_from_last_two_candles(symbol)`` -- derives the
+      reference from the LAST TWO 2-min candles in
+      ``{symbol}_livestream``. Handy for testing at any time of day.
+    * ``get_reference_from_opening_range(symbol, day, or_start, or_end)``
+      -- derives the reference from the OPENING RANGE: every 2-min
+      candle on ``day`` with ``or_start <= Time <= or_end``. Defaults
+      to 16:30-16:32 (two 2-min candles). Returns ``None`` until the
+      closing OR candle has been written.
+
+Both return a ``SimpleNamespace`` exposing ``.symbol``, ``.ref_time``,
+``.ref_open``, ``.ref_close``, ``.ref_low``, ``.ref_field``. Callers
 should not depend on the concrete type -- attribute access is the
-contract.
+contract. Neither builder caches: results are always fresh from the DB.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from dataclasses import dataclass
 from datetime import date, time
 from types import SimpleNamespace
-from typing import Optional, Tuple
-from src.core.config import settings
-from src.database.db_functions import get_last_rows, get_livestream_row_at_time
+from typing import Optional
 
+from src.database.db_functions import get_last_rows, get_session_rows
 
 logger = logging.getLogger(__name__)
 
 
-# The candle label we treat as the production reference. Kept as a module
-# constant so it's obvious where to change it if the ORB anchor moves.
-REFERENCE_TIME: time = time(16, 32)
-
-
-# =============================================================================
-# Production reference: 16:32 candle, cached per symbol per date
-# =============================================================================
-
-
-@dataclass(frozen=True)
-class ReferenceLevel:
+async def get_reference_from_last_two_candles(symbol: str) -> Optional[SimpleNamespace]:
     """
-    Immutable snapshot of the 16:32 opening-range candle for one symbol
-    on one date.
-      * ``ref_close``  -- breakout level (bar must close above this to fire)
-      * ``ref_low``    -- stop anchor; stop = ref_low - ORB_STOP_OFFSET
-      * ``ref_open``   -- candle body reference, used by the green-candle
-                           filter (passes when ``ref_close > ref_open``)
-      * ``ref_field``  -- which OHLC field of the source candle became the
-                           breakout level; one of "open"/"high"/"low"/"close".
-                           Rendered on the chart label as
-                           ``"<ref_field> <ref_time> <ref_close>"``.
+    Reference from the last two 2-min candles: highest High and lowest
+    Low across both. Returns ``None`` if fewer than 2 candles exist.
     """
-    symbol: str
-    ref_date: date
-    ref_time: time      # the source candle's Time (16:32 in production)
-    ref_open: float     # source candle Open
-    ref_close: float    # breakout level value
-    ref_low: float      # stop anchor value
-    ref_field: str      # "open" | "high" | "low" | "close"
+    df_last = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=2)
 
-
-# In-memory cache keyed by uppercase symbol.
-_cache: dict[str, ReferenceLevel] = {}
-# One lock per symbol prevents concurrent 5-sec bars from firing duplicate
-# DB reads while the first fetch is still in flight.
-_locks: dict[str, asyncio.Lock] = {}
-
-
-def _lock_for(symbol: str) -> asyncio.Lock:
-    key = symbol.upper()
-    lock = _locks.get(key)
-    if lock is None:
-        lock = asyncio.Lock()
-        _locks[key] = lock
-    return lock
-
-
-async def _fetch_reference_row(symbol: str, day: date) -> Optional[ReferenceLevel]:
-    """
-    Read the 16:32 row for ``symbol`` on ``day`` from the livestream
-    table and map it into a ``ReferenceLevel``. Uses the candle's CLOSE
-    as the breakout level (``ref_close``), its LOW as the stop anchor
-    (``ref_low``), and carries the OPEN so filters can inspect the
-    candle body. Returns ``None`` if the row has not been written yet
-    or the DB read errored.
-    """
-    row = await get_livestream_row_at_time(symbol, day, REFERENCE_TIME)
-    if row is None:
-        return None
-    ref_t = row["Time"]
-    return ReferenceLevel(
-        symbol=symbol.upper(),
-        ref_date=day,
-        ref_time=ref_t,
-        ref_open=float(row["Open"]),
-        ref_close=float(row["Close"]),
-        ref_low=float(row["Low"]),
-        ref_field="close",
-    )
-
-
-async def get_reference_level(symbol: str, today: date) -> Optional[ReferenceLevel]:
-    """
-    Return the cached 16:32 reference for ``symbol`` on ``today``, fetching
-    from the DB on first use or after a date rollover. ``None`` means the
-    reference isn't available yet (candle not closed / row not written).
-    """
-    key = symbol.upper()
-    cached = _cache.get(key)
-    if cached is not None and cached.ref_date == today:
-        return cached
-
-    async with _lock_for(key):
-        # Re-check under the lock so concurrent 5-sec bars don't double-fetch.
-        cached = _cache.get(key)
-        if cached is not None and cached.ref_date == today:
-            return cached
-
-        fetched = await _fetch_reference_row(symbol, today)
-        if fetched is not None:
-            _cache[key] = fetched
-            logger.info(
-                "reference_level cached: %s -- 2m candle %s %s open=%.2f close=%.2f low=%.2f",
-                fetched.symbol, fetched.ref_date, fetched.ref_time,
-                fetched.ref_open, fetched.ref_close, fetched.ref_low,
-            )
-        return fetched
-
-
-def clear_cache() -> None:
-    """Test / manual-reset hook. Not called in normal operation."""
-    _cache.clear()
-    _locks.clear()
-
-
-# =============================================================================
-# Test-mode reference: high/low of the last two candles, always fresh
-# =============================================================================
-
-
-async def _get_reference_from_last_two_candles(symbol: str) -> Optional[SimpleNamespace]:
-    """
-    Test-mode reference: highest High and lowest Low across the last two
-    2-min candles in ``{symbol}_livestream``. Returns ``None`` if fewer
-    than 2 candles exist.
-    """
-    df_last = await get_last_rows(
-        table_name=f"{symbol.lower()}_livestream", num_rows=2,
-    )
     if df_last.empty or len(df_last) < 2:
         return None
-    # get_last_rows orders ascending by Date, Time -- iloc[-1] is newest.
-    # Identify which of the two candles owns the max High; the label on
-    # the chart will point at THAT candle's timestamp so the user can see
-    # exactly which bar the breakout level came from.
+
     idx_max_high = df_last["High"].idxmax()
     source_row = df_last.loc[idx_max_high]
     highest = float(source_row["High"])
     lowest = float(df_last["Low"].min())
     newest = df_last.iloc[-1]
+
     return SimpleNamespace(
         symbol=symbol.upper(),
         ref_time=source_row["Time"],       # timestamp of the max-high candle
@@ -180,18 +57,54 @@ async def _get_reference_from_last_two_candles(symbol: str) -> Optional[SimpleNa
     )
 
 
-# =============================================================================
-# Top-level dispatcher used by the strategy
-# =============================================================================
-
-
-async def select_reference(symbol: str, today: date) -> Tuple[Optional[object], str]:
+async def get_reference_from_opening_range(
+    symbol: str,
+    day: date,
+    or_start: time = time(16, 30),
+    or_end: time = time(16, 32),
+) -> Optional[SimpleNamespace]:
     """
-    Return ``(reference, label)``. ``reference`` is ``None`` if the
-    reference isn't available yet (16:32 candle not written in
-    production, or fewer than 2 candles in test mode). ``label`` is a
-    short string for logging.
+    Opening-range reference: build the breakout level from every 2-min
+    candle on ``day`` with ``or_start <= Time <= or_end``. Defaults are
+    16:30-16:32 (two 2-min candles); override to widen or shift the
+    window.
+
+    Fields on the returned object:
+      * ``ref_close`` = max High across the OR window (the breakout level)
+      * ``ref_low``   = min Low  across the OR window (the stop anchor)
+      * ``ref_open``  = Open of the FIRST candle in the window
+      * ``ref_time``  = Time of the candle that owns ``ref_close``
+      * ``ref_field`` = ``"high"``
+
+    Returns ``None`` until the ``or_end`` candle has been written to
+    ``{symbol}_livestream`` (i.e. the range is complete). Callers should
+    just retry on the next bar.
     """
-    if settings.ORB_TEST_MODE_USE_LAST_CANDLE:
-        return await _get_reference_from_last_two_candles(symbol), "LAST-2-CANDLES (test mode)"
-    return await get_reference_level(symbol, today), "16:32"
+    df = await get_session_rows(
+        table_name=f"{symbol.lower()}_livestream",
+        day=day,
+        since_time=or_start,
+    )
+    if df.empty:
+        return None
+
+    or_df = df[df["Time"] <= or_end]
+    if or_df.empty:
+        return None
+
+    # Wait for the range to be complete: the closing OR candle must be present.
+    if or_df["Time"].max() < or_end:
+        return None
+
+    idx_max_high = or_df["High"].idxmax()
+    source_row = or_df.loc[idx_max_high]
+    first_row = or_df.iloc[0]
+
+    return SimpleNamespace(
+        symbol=symbol.upper(),
+        ref_time=source_row["Time"],           # timestamp of the max-high candle
+        ref_open=float(first_row["Open"]),     # OR-window opening price, for green-candle filter
+        ref_close=float(source_row["High"]),   # "level to watch" -- the OR high
+        ref_low=float(or_df["Low"].min()),
+        ref_field="high",
+    )

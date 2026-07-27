@@ -30,13 +30,13 @@ def on_bar(symbol: str, bar_time_local: datetime, bar: RealTimeBar) -> None:
     )
 
 
-def on_reference(symbol: str, ref: object) -> None:
+def on_reference(symbol: str, breakout_level: object) -> None:
     viz.record_reference(
         symbol,
-        ref.ref_time,
-        ref.ref_close,
-        ref.ref_low,
-        field=getattr(ref, "ref_field", None),
+        breakout_level.ref_time,
+        breakout_level.ref_close,
+        breakout_level.ref_low,
+        field=getattr(breakout_level, "ref_field", None),
     )
 
 
