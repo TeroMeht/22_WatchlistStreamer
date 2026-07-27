@@ -114,7 +114,7 @@ def format_filter_results(results: List[FilterResult]) -> str:
     failed = [r for r in results if not r.passed]
     if not failed:
         return "filters PASS (" + "; ".join(r.reason for r in results) + ")"
-    return "filter miss: " + "; ".join(r.reason for r in failed)
+    return "filter FAIL: " + "; ".join(r.reason for r in failed)
 
 
 async def evaluate_filters(
@@ -141,9 +141,15 @@ async def evaluate_filters(
     summary = format_filter_results(filter_results)
     passed = all(r.passed for r in filter_results)
     if not passed:
+        # Mirror the pass-case log shape from _handle_possible_breakout so
+        # both paths read the same left-to-right. Pass lines add a
+        # trailing "| <breakout status>" that fails don't reach.
         logger.info(
-            "ORB long: %s -- %s (LIVE 5s bar %s close=%.2f | LEVEL close=%.2f)",
-            symbol, summary,
-            bar_time_local.time(), current_price, breakout_level.ref_close,
+            "ORB long: %s -- Incoming livestream %s price=%.2f | Breakout level %s "
+            "price=%.2f low=%.2f | %s",
+            symbol,
+            bar_time_local.time(), current_price,
+            breakout_level.ref_time, breakout_level.ref_close, breakout_level.ref_low,
+            summary,
         )
     return passed, summary
