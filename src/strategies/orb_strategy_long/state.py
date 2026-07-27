@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .visualization import orb_state as viz
 
 
 

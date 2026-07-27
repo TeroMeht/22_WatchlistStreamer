@@ -1,10 +1,11 @@
 from src.database.db_functions import *
 import logging
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)  # module-specific logger
 
 
-def detect_stoplevel(df: pd.DataFrame, direction: str, offset: float = 0.10) -> float:
+def detect_stoplevel(df: pd.DataFrame, direction: str) -> float:
 
     if df.empty:
         raise ValueError("DataFrame is empty, cannot detect stop level")
@@ -17,16 +18,16 @@ def detect_stoplevel(df: pd.DataFrame, direction: str, offset: float = 0.10) -> 
 
     if direction == "long":
         reference_price = df["Low"].min()
-        stop_level = round(reference_price - offset, 2)
+        stop_level = round(reference_price - settings.ORB_STOP_OFFSET, 2)
     elif direction == "short":
         reference_price = df["High"].max()
-        stop_level = round(reference_price + offset, 2)
+        stop_level = round(reference_price + settings.ORB_STOP_OFFSET, 2)
     else:
         raise ValueError(f"Unsupported direction: {direction}")
 
     logger.info(
         "Stop level detected: direction=%s reference=%.2f offset=%.2f stop=%.2f",
-        direction, reference_price, offset, stop_level,
+        direction, reference_price, settings.ORB_STOP_OFFSET, stop_level,
     )
 
     return stop_level

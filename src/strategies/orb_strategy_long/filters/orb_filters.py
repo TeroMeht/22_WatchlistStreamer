@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 
 from src.core.config import settings
-from typing import List, NamedTuple
+from typing import List, NamedTuple, Tuple
 from src.database.db_functions import get_last_rows
 
 from ..state import yesterday_close, yesterday_high
@@ -103,7 +103,7 @@ async def check_reference_candle_green(breakout_level) -> FilterResult:
 async def run_all_filters(symbol: str, current_price: float, breakout_level) -> List[FilterResult]:
     return [
         #await check_reference_candle_green(breakout_level),
-        #await check_rvol_gte(symbol, settings.ORB_MIN_RVOL),
+        await check_rvol_gte(symbol, settings.ORB_MIN_RVOL),
         await check_price_above_yesterday_high(symbol, current_price),
         await check_price_above_yesterday_close(symbol, current_price),
     ]
@@ -122,20 +122,28 @@ async def evaluate_filters(
     current_price: float,
     breakout_level,
     bar_time_local,
-) -> bool:
+) -> Tuple[bool, str]:
     """
     Run all setup filters and handle the miss-log path here so callers
-    don't have to branch. Returns ``True`` when every filter passed,
-    ``False`` if any failed -- in which case a compact one-line miss
-    summary is logged before returning. Callers should treat ``False``
-    as "skip breakout for this bar".
+    don't have to branch. Returns ``(passed, summary)``:
+
+      * ``passed``  -- ``True`` when every filter passed, else ``False``.
+      * ``summary`` -- a compact one-line string built by
+        ``format_filter_results`` describing the outcome; safe to splice
+        into downstream log lines (e.g. the Phase 3 breakout log) so the
+        filter status is visible on every tick.
+
+    On a miss we also log the one-line summary here so operators see the
+    reason even though the caller short-circuits. Callers should treat
+    ``passed=False`` as "skip breakout for this bar".
     """
     filter_results = await run_all_filters(symbol, current_price, breakout_level)
-    if not all(r.passed for r in filter_results):
+    summary = format_filter_results(filter_results)
+    passed = all(r.passed for r in filter_results)
+    if not passed:
         logger.info(
             "ORB long: %s -- %s (LIVE 5s bar %s close=%.2f | LEVEL close=%.2f)",
-            symbol, format_filter_results(filter_results),
+            symbol, summary,
             bar_time_local.time(), current_price, breakout_level.ref_close,
         )
-        return False
-    return True
+    return passed, summary

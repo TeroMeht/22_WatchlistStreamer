@@ -57,11 +57,11 @@ def detect_breakout(livestream_last: float, breakout_level: float) -> BreakoutEv
     if livestream_last > breakout_level:
         return BreakoutEvent(
             True,
-            f"BREAKOUT (bar close {livestream_last:.2f} > ref close {breakout_level:.2f})",
+            f"BREAKOUT (incoming livestream price {livestream_last:.2f} > ref close {breakout_level:.2f})",
         )
     return BreakoutEvent(
         False,
-        f"no breakout yet (bar close {livestream_last:.2f} <= ref close {breakout_level:.2f})",
+        f"no breakout detected",
     )
 
 
@@ -69,17 +69,24 @@ def detect_breakout(livestream_last: float, breakout_level: float) -> BreakoutEv
 
 
 
-async def _handle_possible_breakout(incoming_data_stream: RealTimeBar, symbol: str, breakout_level, bar_time_local) -> None:
+async def _handle_possible_breakout(
+    incoming_data_stream: RealTimeBar,
+    symbol: str,
+    breakout_level,
+    bar_time_local,
+    filters_summary: str,
+) -> None:
 
     # --- Phase 3: breakout detection ----------------------------------------
     event = detect_breakout(float(incoming_data_stream.close), breakout_level.ref_close)
 
     logger.info(
-        "ORB long: %s -- LiveStream last %s price=%.2f | Breakout level %s "
-        "price=%.2f low=%.2f | %s",
+        "ORB long: %s -- Incoming livestream %s price=%.2f | Breakout level %s "
+        "price=%.2f low=%.2f | %s | %s",
         symbol,
         bar_time_local.time(), float(incoming_data_stream.close),
         breakout_level.ref_time, breakout_level.ref_close, breakout_level.ref_low,
+        filters_summary,
         event.reason,
     )
 
@@ -91,7 +98,7 @@ async def _handle_possible_breakout(incoming_data_stream: RealTimeBar, symbol: s
     # --- Phase 4: fire ------------------------------------------------------
     stop_level = round(breakout_level.ref_low - settings.ORB_STOP_OFFSET, 2)
     logger.info(
-        "ORB long breakout FIRED: %s -- LiveStream last %s price=%.2f > "
+        "ORB long breakout FIRED: %s -- Incoming livestream  %s price=%.2f > "
         "Breakout level %s price=%.2f (low=%.2f, stop=%.2f)",
         symbol,
         bar_time_local.time(), float(incoming_data_stream.close),
@@ -140,9 +147,11 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
     hooks.on_reference(symbol, breakout_level)
 
     # --- Phase 2: setup filters --------------------------------------------
-    filters_passed = await evaluate_filters(symbol, float(bar.close), breakout_level, bar_time_local)
+    filters_passed, filters_summary = await evaluate_filters(symbol, float(bar.close), breakout_level, bar_time_local)
 
     if filters_passed:
-        await _handle_possible_breakout(bar, symbol, breakout_level, bar_time_local)
+        await _handle_possible_breakout(bar, symbol, breakout_level, bar_time_local, filters_summary)
 
+    else:
+        return
 

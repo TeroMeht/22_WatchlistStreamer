@@ -9,7 +9,7 @@ from typing import Dict, Set
 
 from src.exit_strategies import *
 from src.entry_strategies import *
-from src.strategies.orb_strategy.strategy import orb_breakout_long
+from src.strategies.orb_strategy_long.strategy import orb_breakout_long
 
 
 logger = logging.getLogger(__name__)
