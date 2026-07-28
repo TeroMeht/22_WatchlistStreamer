@@ -12,7 +12,7 @@ from .utils import *
 from .ibclient import *
 
 from src.strategies.strategies import *
-from src.strategies.orb_strategy_long.visualization import orb_state as viz
+from src.strategies.orb_long.visualization import state as viz
 from src.core.config import settings
 from datetime import datetime
 from zoneinfo import ZoneInfo

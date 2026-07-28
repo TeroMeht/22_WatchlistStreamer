@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from . import orb_state
+from . import state as orb_state
 
 logger = logging.getLogger(__name__)
 

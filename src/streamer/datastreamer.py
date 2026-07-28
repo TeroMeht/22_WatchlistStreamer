@@ -18,9 +18,9 @@ from src.helpers.handle_dataframes import *
 from src.helpers.process_incoming_data import CandleStore
 from src.database.watchlist import load_watchlist, create_watchlist_tables
 from src.database.exit_requests import load_armed_exit_strategies
-from src.strategies.orb_strategy_long.visualization.orb_dashboard import start_dashboard
-from src.strategies.orb_strategy_long.visualization import orb_state as viz
-from src.strategies.orb_strategy_long import state as orb_strategy_state
+from src.strategies.orb_long.visualization.dashboard import start_dashboard
+from src.strategies.orb_long.visualization import state as viz
+from src.strategies.orb_long import state as orb_strategy_state
 from src.core.config import settings
 
 

@@ -21,7 +21,8 @@ from __future__ import annotations
 
 from src.strategies.entry_strategies import *
 from src.strategies.exit_strategies import *
-from src.strategies.orb_strategy_long.strategy import orb_breakout_long
+from src.strategies.orb_long.strategy import orb_breakout_long
+from src.strategies.reversal_long.strategy import reversal_long_strategy
 
 
 # Candle-driven (2-min) entries. Callable: fn(candle) -> coroutine.
@@ -44,5 +45,6 @@ EXIT_STRATEGIES: dict = {
 
 # Realtime (5-sec) entries. Callable: fn(bar, symbol) -> coroutine.
 REALTIME_ENTRY_STRATEGIES: dict = {
-    "orb_breakout_long": orb_breakout_long,
+    "orb_breakout_long":       orb_breakout_long,
+    "reversal_long_breakout":  reversal_long_strategy,
 }

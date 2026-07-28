@@ -7,8 +7,9 @@ modules; the breakout predicate lives inline just above the orchestrator
 so the fire path reads top-to-bottom.
 
 Fire semantics (current build):
-    * Reference must be available: at least two 2-min candles in the
-      livestream table (see ``reference.get_reference_from_last_two_candles``).
+    * Reference must be available: the OPENING RANGE (default 16:30-16:32)
+      must be complete in the livestream table
+      (see ``reference.get_reference_from_opening_range``).
     * ALL setup filters must pass on the current bar. If any filter
       fails, skip the breakout check entirely -- ``detect_breakout``
       is stateless so there's no crossing bookkeeping to preserve.
@@ -22,6 +23,7 @@ Fire semantics (current build):
 from __future__ import annotations
 
 import logging
+from datetime import time
 from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
@@ -29,13 +31,16 @@ from ib_async import RealTimeBar
 from src.helpers.handle_candles import stream_data_to_candle_row
 from src.core.config import settings
 
-from .actions.orb_actions import fire_signal
-from .filters.orb_filters import evaluate_filters
-from .hooks import orb_hooks as hooks
-from .reference import get_reference_from_last_two_candles
+from src.strategies.actions import fire_signal
+from .filters.filters import evaluate_filters
+from .hooks import hooks as hooks
+from .reference import get_reference_from_opening_range,get_reference_from_last_two_candles
 from .state import has_fired, mark_fired
 
 logger = logging.getLogger(__name__)
+
+# Signal name used in the alarm row + Telegram message when this strategy fires.
+ORB_LONG_SIGNAL_NAME: str = "ORB long breakout"
 
 
 # =============================================================================
@@ -107,7 +112,7 @@ async def _handle_possible_breakout(
     )
 
     candle = stream_data_to_candle_row(symbol, incoming_data_stream, bar_time_local)
-    await fire_signal(candle, stop_level)
+    await fire_signal(candle, ORB_LONG_SIGNAL_NAME, stop_level=stop_level)
     hooks.on_fire(symbol, bar_time_local, float(incoming_data_stream.close), stop_level, breakout_level.ref_close)
     # Latch the strategy for this symbol -- no further fires until restart.
     mark_fired(symbol)
@@ -120,6 +125,7 @@ async def _handle_possible_breakout(
 async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
 
     bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(settings.TIMEZONE))
+    today = bar_time_local.date()
 
     # Chart animates on every tick regardless of what branch we take below.
     hooks.on_bar(symbol, bar_time_local, bar)
@@ -134,24 +140,26 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
         return
 
     # --- Phase 1: reference selection ---------------------------------------
-    breakout_level = await get_reference_from_last_two_candles(symbol)
-    # or with a custom window:
-    # breakout_level = await get_reference_from_opening_range(symbol, today, time(16, 30), time(16, 32))
+    # breakout_level = await get_reference_from_last_two_candles(symbol)
+    breakout_level = await get_reference_from_opening_range(
+        symbol, today, or_start=time(16, 30), or_end=time(16, 32),
+    )
 
     if breakout_level is None:
-        logger.debug("ORB long: %s --reference not available yet "
-                     "(LIVE 5s bar %s close=%.2f)",
-                     symbol,  bar_time_local.time(), float(bar.close))
+        logger.debug(
+            "ORB long: %s -- opening-range reference not available yet "
+            "(LIVE 5s bar %s close=%.2f)",
+            symbol, bar_time_local.time(), float(bar.close),
+        )
         return
-    
+
     hooks.on_reference(symbol, breakout_level)
 
     # --- Phase 2: setup filters --------------------------------------------
-    filters_passed, filters_summary = await evaluate_filters(symbol, float(bar.close), breakout_level, bar_time_local)
+    filters_passed, filters_summary = await evaluate_filters(
+        symbol, float(bar.close), breakout_level, bar_time_local,
+    )
 
     if filters_passed:
         await _handle_possible_breakout(bar, symbol, breakout_level, bar_time_local, filters_summary)
-
-    else:
-        return
 

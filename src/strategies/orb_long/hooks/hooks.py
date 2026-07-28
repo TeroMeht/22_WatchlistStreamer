@@ -15,7 +15,7 @@ from datetime import datetime
 
 from ib_async import RealTimeBar
 
-from ..visualization import orb_state as viz
+from ..visualization import state as viz
 
 
 def on_bar(symbol: str, bar_time_local: datetime, bar: RealTimeBar) -> None:

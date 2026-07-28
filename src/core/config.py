@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # ORB strategy parameters
     ORB_STOP_OFFSET: float
-    ORB_MIN_RVOL: float
+    RVOL_THRESHOLD: float
 
     TIMEZONE: str
     EXIT_REQUEST_ENDPOINT: str
