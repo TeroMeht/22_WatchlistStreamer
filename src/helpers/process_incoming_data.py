@@ -13,6 +13,8 @@ from .ibclient import *
 
 from src.strategies.strategies import *
 from src.strategies.orb_long.visualization import state as viz
+from src.strategies.reversal_long.visualization import state as reversal_viz
+from src.strategies.visualization import chart_state as candle_timeline
 from src.core.config import settings
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -92,17 +94,20 @@ async def finalize_candle(last_candle,
     logger.info(f"Finalized candle for {symbol} at {last_candle.time}: O={last_candle.open}, H={last_candle.high}, L={last_candle.low}, C={last_candle.close}, V={last_candle.volume}, VWAP={last_candle.vwap}, EMA9={last_candle.ema9}, RelatR={last_candle.relatR}, AvgVol={last_candle.avg_volume}, RVol={last_candle.rvol}")
     await insert_candlestick_row(db_ready_candle)
  
-    viz.record_finalized_2min_candle(
+    # Push the finalized 2-min candle to the SHARED candle timeline once;
+    # both per-strategy viz modules delegate to it internally.
+    candle_dt = datetime.combine(db_ready_candle.date, db_ready_candle.time)
+    candle_timeline.record_finalized_2min_candle(
         symbol=symbol,
-        candle_dt=datetime.combine(db_ready_candle.date, db_ready_candle.time),
+        candle_dt=candle_dt,
         open_=db_ready_candle.open,
         high=db_ready_candle.high,
         low=db_ready_candle.low,
         close=db_ready_candle.close,
     )
-    # Push the just-computed Rvol into the dashboard for the
-    # setup-validation checkbox (Rvol > 3).
-    viz.record_rvol(symbol, db_ready_candle.rvol)
+    # Per-strategy overlays: metric each dashboard needs for its own checks.
+    viz.record_rvol(symbol, db_ready_candle.rvol)            # ORB: Rvol > 3 check
+    reversal_viz.record_relatr(symbol, db_ready_candle.relatR)  # reversal: recent-capitulation check
     # NOTE: the frontend live table now polls /api/livestream/latest on a
     # 10s interval, so we no longer push each finalized candle to FastAPI.
     await run_strategies(last_candle)

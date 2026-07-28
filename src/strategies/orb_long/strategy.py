@@ -24,104 +24,38 @@ from __future__ import annotations
 
 import logging
 from datetime import time
-from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from ib_async import RealTimeBar
-from src.helpers.handle_candles import stream_data_to_candle_row
+
 from src.core.config import settings
 
 from src.strategies.actions import fire_signal
+from src.strategies.breakout_level import (
+    get_reference_from_last_two_candles,
+    get_reference_from_opening_range,
+)
+from src.strategies.detection import detect_breakout
+from src.strategies.hooks import make_hooks
 from .filters.filters import evaluate_filters
-from .hooks import hooks as hooks
-from .reference import get_reference_from_opening_range,get_reference_from_last_two_candles
 from .state import has_fired, mark_fired
+from .visualization import state as viz
 
 logger = logging.getLogger(__name__)
 
 # Signal name used in the alarm row + Telegram message when this strategy fires.
 ORB_LONG_SIGNAL_NAME: str = "ORB long breakout"
 
-
-# =============================================================================
-# Breakout signal detection
-# =============================================================================
-# Stateless predicate: is the current bar's close above the reference?
-# The session one-shot latch in ``state.py`` handles the "don't re-fire"
-# concern, so this doesn't need to remember whether the previous bar was
-# above ref.
-
-
-class BreakoutEvent(NamedTuple):
-    is_breakout: bool
-    reason: str  # human-readable string for logging
-
-
-def detect_breakout(livestream_last: float, breakout_level: float) -> BreakoutEvent:
-    """True when ``bar_close`` is strictly above ``ref_close``."""
-    if livestream_last > breakout_level:
-        return BreakoutEvent(
-            True,
-            f"BREAKOUT (incoming livestream price {livestream_last:.2f} > ref close {breakout_level:.2f})",
-        )
-    return BreakoutEvent(
-        False,
-        f"no breakout detected",
-    )
-
-
-
-
-
-
-async def _handle_possible_breakout(
-    incoming_data_stream: RealTimeBar,
-    symbol: str,
-    breakout_level,
-    bar_time_local,
-    filters_summary: str,
-) -> None:
-
-    # --- Phase 3: breakout detection ----------------------------------------
-    event = detect_breakout(float(incoming_data_stream.close), breakout_level.ref_close)
-
-    logger.info(
-        "ORB long: %s -- Incoming livestream %s price=%.2f | Breakout level %s "
-        "price=%.2f low=%.2f | %s | %s",
-        symbol,
-        bar_time_local.time(), float(incoming_data_stream.close),
-        breakout_level.ref_time, breakout_level.ref_close, breakout_level.ref_low,
-        filters_summary,
-        event.reason,
-    )
-
-    if not event.is_breakout:
-        return
-
-    hooks.on_breakout(symbol)
-
-    # --- Phase 4: fire ------------------------------------------------------
-    stop_level = round(breakout_level.ref_low - settings.ORB_STOP_OFFSET, 2)
-    logger.info(
-        "ORB long breakout FIRED: %s -- Incoming livestream  %s price=%.2f > "
-        "Breakout level %s price=%.2f (low=%.2f, stop=%.2f)",
-        symbol,
-        bar_time_local.time(), float(incoming_data_stream.close),
-        breakout_level.ref_time, breakout_level.ref_close,
-        breakout_level.ref_low, stop_level,
-    )
-
-    candle = stream_data_to_candle_row(symbol, incoming_data_stream, bar_time_local)
-    await fire_signal(candle, ORB_LONG_SIGNAL_NAME, stop_level=stop_level)
-    hooks.on_fire(symbol, bar_time_local, float(incoming_data_stream.close), stop_level, breakout_level.ref_close)
-    # Latch the strategy for this symbol -- no further fires until restart.
-    mark_fired(symbol)
+# Bind the shared hook factory to this strategy's viz state module.
+hooks = make_hooks(viz)
 
 
 
 # =============================================================================
 # Strategy orchestrator
 # =============================================================================
+
+
 async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
 
     bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(settings.TIMEZONE))
@@ -141,9 +75,8 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
 
     # --- Phase 1: reference selection ---------------------------------------
     # breakout_level = await get_reference_from_last_two_candles(symbol)
-    breakout_level = await get_reference_from_opening_range(
-        symbol, today, or_start=time(16, 30), or_end=time(16, 32),
-    )
+
+    breakout_level = await get_reference_from_opening_range(symbol, today, or_start=time(16, 30), or_end=time(16, 32))
 
     if breakout_level is None:
         logger.debug(
@@ -156,10 +89,44 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
     hooks.on_reference(symbol, breakout_level)
 
     # --- Phase 2: setup filters --------------------------------------------
-    filters_passed, filters_summary = await evaluate_filters(
-        symbol, float(bar.close), breakout_level, bar_time_local,
+
+    filters_passed, filters_summary = await evaluate_filters(symbol, float(bar.close))
+
+    if not filters_passed:
+        logger.info(
+            "ORB long: %s -- Incoming livestream %s price=%.2f | Breakout level %s "
+            "price=%.2f low=%.2f | %s",
+            symbol,
+            bar_time_local.time(), float(bar.close),
+            breakout_level.ref_time, breakout_level.ref_close, breakout_level.ref_low,
+            filters_summary,
+        )
+        return
+
+    # --- Phase 3: breakout detection ---------------------------------------
+    event = detect_breakout(float(bar.close), breakout_level.ref_close)
+    logger.info(
+        "ORB long: %s -- Incoming livestream %s price=%.2f | Breakout level %s "
+        "price=%.2f low=%.2f | %s | %s",
+        symbol,
+        bar_time_local.time(), float(bar.close),
+        breakout_level.ref_time, breakout_level.ref_close, breakout_level.ref_low,
+        filters_summary,
+        event.reason,
+    )
+    if not event.is_breakout:
+        return
+
+
+    # --- Phase 4: detect stop level ---------------------------------------------
+    stop_level = round(breakout_level.ref_low - settings.ORB_STOP_OFFSET, 2)
+
+    # --- Phase 5: fire alarm and generate order ---------------------------------------------
+    await fire_signal(
+        bar, symbol, breakout_level, bar_time_local, stop_level,
+        signal_name=ORB_LONG_SIGNAL_NAME,
+        hooks=hooks,
+        mark_fired=mark_fired,
     )
 
-    if filters_passed:
-        await _handle_possible_breakout(bar, symbol, breakout_level, bar_time_local, filters_summary)
 

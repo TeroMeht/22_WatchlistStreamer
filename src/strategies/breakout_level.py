@@ -1,34 +1,44 @@
 """
-Reference-candle builders for the ORB long strategy.
+Shared breakout-level (reference) builders for entry strategies.
 
-Two builders live here; the strategy imports and calls ONE of them
-directly:
+Two builders live here; each strategy imports and calls whichever one
+fits its setup:
 
     * ``get_reference_from_last_two_candles(symbol)`` -- derives the
-      reference from the LAST TWO 2-min candles in
-      ``{symbol}_livestream``. Handy for testing at any time of day.
+      breakout level from the LAST TWO 2-min candles in
+      ``{symbol}_livestream``. Rolling: re-reads every call, always
+      fresh. Handy for testing at any time of day and for strategies
+      whose level is a moving 2-bar high (e.g. reversal_long).
+
     * ``get_reference_from_opening_range(symbol, day, or_start, or_end)``
-      -- derives the reference from the OPENING RANGE: every 2-min
+      -- derives the breakout level from the OPENING RANGE: every 2-min
       candle on ``day`` with ``or_start <= Time <= or_end``. Defaults
       to 16:30-16:32 (two 2-min candles). Returns ``None`` until the
-      closing OR candle has been written.
+      closing OR candle has been written; callers just retry on the
+      next bar. Used by ORB long.
 
-Both return a ``SimpleNamespace`` exposing ``.symbol``, ``.ref_time``,
-``.ref_open``, ``.ref_close``, ``.ref_low``, ``.ref_field``. Callers
-should not depend on the concrete type -- attribute access is the
-contract. Neither builder caches: results are always fresh from the DB.
+Both return a ``SimpleNamespace`` exposing the same attribute contract
+so downstream code (hooks, filters, dashboard) doesn't care which
+builder produced the level:
+
+    .symbol       -- uppercase symbol
+    .ref_time     -- Time of the candle that owns the level
+    .ref_open     -- Open of the "trigger" candle (for green-candle filters)
+    .ref_close    -- LEVEL to watch (the price a live bar must break)
+    .ref_low      -- STOP anchor
+    .ref_field    -- which OHLC field became the level; "high" for both
+
+Attribute access is the contract; the concrete type may change.
+Neither builder caches: results are always fresh from the DB.
 """
 
 from __future__ import annotations
 
-import logging
 from datetime import date, time
 from types import SimpleNamespace
 from typing import Optional
 
 from src.database.db_functions import get_last_rows, get_session_rows
-
-logger = logging.getLogger(__name__)
 
 
 async def get_reference_from_last_two_candles(symbol: str) -> Optional[SimpleNamespace]:

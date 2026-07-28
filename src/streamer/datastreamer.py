@@ -18,9 +18,11 @@ from src.helpers.handle_dataframes import *
 from src.helpers.process_incoming_data import CandleStore
 from src.database.watchlist import load_watchlist, create_watchlist_tables
 from src.database.exit_requests import load_armed_exit_strategies
-from src.strategies.orb_long.visualization.dashboard import start_dashboard
+from src.strategies.visualization.dashboard import start_dashboard
 from src.strategies.orb_long.visualization import state as viz
 from src.strategies.orb_long import state as orb_strategy_state
+from src.strategies.reversal_long.visualization import state as reversal_viz
+from src.strategies.visualization import chart_state as candle_timeline
 from src.core.config import settings
 
 
@@ -43,7 +45,8 @@ async def run_streamer(ib):
         payload={"pid": os.getpid()},
     )
 
-    # Bring up the ORB visualization dashboard (localhost:8765). Non-fatal
+    # Bring up the unified strategy dashboard (localhost:8790). One page
+    # renders overlays from every strategy's viz state module. Non-fatal
     # if aiohttp isn't installed -- start_dashboard logs and returns None.
     await start_dashboard()
 
@@ -136,22 +139,26 @@ async def run_streamer(ib):
         *(create_and_fill_table_async(df) for df in relatr_datasets.values())
     )
 
-    # --- Seed the ORB dashboard with the historical 2-min candles now
-    # sitting in each livestream table. Live 5-sec ticks will animate the
-    # next candle after these; finalize_candle will keep appending as the
-    # session runs. Only the intraday OHLC columns are needed.
+    # --- Seed the shared candle timeline with historical 2-min candles.
+    # Live 5-sec ticks will animate the next candle after these;
+    # finalize_candle keeps appending as the session runs. Both dashboards
+    # read from this same timeline, so we seed it once here.
     for symbol, df in relatr_datasets.items():
         if df is None or df.empty:
             continue
-        viz.seed_from_history(symbol, df.to_dict(orient="records"))
-        # Seed the latest Rvol from the most recent historical 2-min row so
-        # the "Rvol > 3" check has a value immediately -- we don't have to
-        # wait for the first live 2-min candle to finalize. Live finalizes
-        # will keep overwriting this via record_rvol as the day progresses.
+        candle_timeline.seed_from_history(symbol, df.to_dict(orient="records"))
+        # Per-strategy overlay seeds:
+        # ORB: latest Rvol so the "Rvol > 3" check has a value on load.
         if "Rvol" in df.columns:
             viz.record_rvol(symbol, float(df.iloc[-1]["Rvol"]))
+        # reversal_long: tail of the historical Relatr column so the
+        # "recent capitulation" check reflects state at startup. The
+        # writer maintains a rolling window internally.
+        if "Relatr" in df.columns:
+            for r in df["Relatr"].dropna().tail(reversal_viz.RECENT_RELATR_WINDOW):
+                reversal_viz.record_relatr(symbol, float(r))
     logging.info(
-        "ORB dashboard seeded with historical 2-min candles for %d symbols",
+        "Candle timeline seeded (%d symbols) + per-strategy overlays warmed up",
         sum(1 for df in relatr_datasets.values() if df is not None and not df.empty),
     )
 
@@ -170,7 +177,8 @@ async def run_streamer(ib):
         # Two sinks: the dashboard (for the checkbox rows) and the strategy
         # state (for the yesterday-level filters). Both are cheap in-memory
         # writes; keeping them separate preserves the strategy/viz split.
-        viz.record_yesterday_daily(symbol=symbol, high=yhi, close=ycl)
+        # Single write to the strategy state; the dashboard reads yesterday's
+        # values from there via viz.snapshot() so we don't keep two copies.
         orb_strategy_state.record_yesterday_daily(symbol=symbol, high=yhi, close=ycl)
 
     # --- Determine and log dropped tickers ---

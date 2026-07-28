@@ -1,15 +1,20 @@
 """
 Setup filters for the reversal_long breakout strategy.
 
-Only one filter today: ``check_recent_capitulation``. Fires the strategy
-gate as PASS when at least one of the last ``lookback`` 2-min candles
-has ``Relatr >= CAPITULATION_THRESHOLD`` -- i.e. there was recent panic
+Only one filter today: ``check_recent_capitulation``. Passes when at
+least one of the last ``lookback`` 2-min candles has
+``Relatr >= CAPITULATION_THRESHOLD`` -- i.e. there was recent panic
 selling. Once that trigger fires we start monitoring for a 2-bar high
 breakout on the 5-sec path.
 
 The lookback window is intentionally narrow so "still capitulating"
 (very fresh spike) still blocks a bit of the noise, and "capitulated
 then flattening" is the setup we're waiting for.
+
+One wrapper -- ``evaluate_filters`` -- runs every filter, aggregates
+the results, and returns ``(passed, summary)`` to the strategy. The
+strategy logs the outcome and decides whether to short-circuit; this
+module has no side effects beyond DB reads.
 """
 
 from __future__ import annotations
@@ -36,7 +41,14 @@ class FilterResult(NamedTuple):
     reason: str
 
 
-async def check_recent_capitulation(symbol: str, lookback: int = CAPITULATION_LOOKBACK_CANDLES) -> FilterResult:
+# =============================================================================
+# Individual filters
+# =============================================================================
+
+
+async def check_recent_capitulation(
+    symbol: str, lookback: int = CAPITULATION_LOOKBACK_CANDLES,
+) -> FilterResult:
     """
     Pass when any of the last ``lookback`` 2-min candles in
     ``{symbol}_livestream`` has ``Relatr >= CAPITULATION_THRESHOLD``.
@@ -66,47 +78,23 @@ async def check_recent_capitulation(symbol: str, lookback: int = CAPITULATION_LO
     )
 
 
-async def run_all_filters(symbol: str) -> List[FilterResult]:
-    return [
-        await check_recent_capitulation(symbol),
-    ]
+# =============================================================================
+# Aggregate wrapper
+# =============================================================================
 
 
-def format_filter_results(results: List[FilterResult]) -> str:
-    """Compact one-line summary useful for log lines: PASS or per-fail reasons."""
+def _format(results: List[FilterResult]) -> str:
+    """Compact one-line summary for log lines: PASS reasons or per-fail reasons."""
     failed = [r for r in results if not r.passed]
     if not failed:
         return "filters PASS (" + "; ".join(r.reason for r in results) + ")"
     return "filter FAIL: " + "; ".join(r.reason for r in failed)
 
 
-async def evaluate_filters(
-    symbol: str,
-    current_price: float,
-    breakout_level,
-    bar_time_local,
-) -> Tuple[bool, str]:
-    """
-    Run all setup filters and handle the miss-log path here so callers
-    don't have to branch. Returns ``(passed, summary)``:
+async def evaluate_filters(symbol: str) -> Tuple[bool, str]:
 
-      * ``passed``  -- ``True`` when every filter passed, else ``False``.
-      * ``summary`` -- compact one-line string built by
-        ``format_filter_results`` for downstream log splicing.
-
-    On a miss, logs a one-line summary here in the same shape as the
-    pass-case Phase 3 log so both paths read the same left-to-right.
-    """
-    filter_results = await run_all_filters(symbol)
-    summary = format_filter_results(filter_results)
-    passed = all(r.passed for r in filter_results)
-    if not passed:
-        logger.info(
-            "reversal_long: %s -- Incoming livestream %s price=%.2f | Breakout level %s "
-            "price=%.2f low=%.2f | %s",
-            symbol,
-            bar_time_local.time(), current_price,
-            breakout_level.ref_time, breakout_level.ref_close, breakout_level.ref_low,
-            summary,
-        )
-    return passed, summary
+    results = [
+        await check_recent_capitulation(symbol),
+    ]
+    
+    return all(r.passed for r in results), _format(results)
