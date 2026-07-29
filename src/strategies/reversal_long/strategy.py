@@ -64,10 +64,20 @@ async def reversal_long_strategy(bar: RealTimeBar, symbol: str) -> None:
     # Chart animates on every tick regardless of what branch we take below.
     hooks.on_bar(symbol, bar_time_local, bar)
 
+    # --- Session one-shot latch -------------------------------------------
+    # Once the alarm has fired, we stop trailing the rolling 2-bar high --
+    # the reference line freezes at its fire-time value (same behavior as
+    # ORB long). Subsequent bars still animate the candle series but skip
+    # every hook that would move the level.
+    if has_fired(symbol):
+        logger.debug(
+            "reversal_long: %s already fired this session -- latched until restart "
+            "(LIVE 5s bar %s close=%.2f)",
+            symbol, bar_time_local.time(), float(bar.close),
+        )
+        return
+
     # --- Phase 1: reference selection ---------------------------------------
-    # Kept BEFORE the fire latch so the rolling last-2-bar high keeps
-    # updating on the dashboard even after the strategy has fired (the
-    # latch is only about not re-firing, not about freezing the viz).
     breakout_level = get_reference_from_last_two_candles(symbol)
     if breakout_level is None:
         logger.debug(
@@ -78,17 +88,6 @@ async def reversal_long_strategy(bar: RealTimeBar, symbol: str) -> None:
         return
 
     hooks.on_reference(symbol, breakout_level)
-
-    # --- Session one-shot latch -------------------------------------------
-    # Placed AFTER the reference update so post-fire ticks still refresh
-    # the 2-bar high on the chart; only the fire pipeline is short-circuited.
-    if has_fired(symbol):
-        logger.debug(
-            "reversal_long: %s already fired this session -- latched until restart "
-            "(LIVE 5s bar %s close=%.2f)",
-            symbol, bar_time_local.time(), float(bar.close),
-        )
-        return
 
     # --- Phase 2: setup filters --------------------------------------------
 

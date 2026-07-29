@@ -46,7 +46,7 @@ from typing import Optional
 
 from src.strategies.orb_long.visualization import state as orb_viz
 from src.strategies.reversal_long.visualization import state as reversal_viz
-from src.strategies.state import get_watchlist_strategies_for
+from src.strategies.dispatcher_state import get_watchlist_strategies_for
 
 logger = logging.getLogger(__name__)
 

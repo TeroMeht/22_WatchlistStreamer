@@ -22,7 +22,7 @@ async def archive_livestream_tables() -> None:
     long-lived ``bars_2m_archive`` table, then let the caller drop the
     per-symbol livestream tables.
 
-    Called from ``run_streamer`` right BEFORE ``delete_all_tables_db_async``
+    Called from ``prepare_database`` right BEFORE ``delete_all_tables_db_async``
     so historical + previous-session live bars survive the startup wipe.
     Idempotent: the ``(Symbol, Date, Time)`` unique constraint plus
     ``ON CONFLICT DO NOTHING`` means re-runs never dupe rows.
@@ -547,21 +547,25 @@ async def get_livestream_row_at_time(
     return dict(row)
 
 
-async def create_alarms_table(db_conn: asyncpg.Connection) -> None:
+async def create_alarms_table() -> None:
     """
-    Create the alarms table if it doesn't already exist.
+    Create the shared ``alarms`` table if it doesn't already exist.
+    Acquires its own connection from the global pool -- callers should
+    ``init_db_pool()`` first but do not need to hand a connection in.
     """
-    await db_conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS alarms (
-            "Id" SERIAL PRIMARY KEY,
-            "Symbol" TEXT NOT NULL,
-            "Time" TIME WITHOUT TIME ZONE NOT NULL,
-            "Alarm" TEXT NOT NULL,
-            "Date" DATE NOT NULL
-        );
-        """
-    )
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alarms (
+                "Id" SERIAL PRIMARY KEY,
+                "Symbol" TEXT NOT NULL,
+                "Time" TIME WITHOUT TIME ZONE NOT NULL,
+                "Alarm" TEXT NOT NULL,
+                "Date" DATE NOT NULL
+            );
+            """
+        )
 
 
 async def insert_alarm(candle: CandleRow, alarm_message:str):
@@ -593,22 +597,26 @@ async def insert_alarm(candle: CandleRow, alarm_message:str):
 #------------------Order handling--------------------------------------------------------------
 
 
-async def create_orders_table(db_conn: asyncpg.Connection) -> None:
+async def create_orders_table() -> None:
     """
-    Create the orders table if it doesn't already exist.
+    Create the shared ``orders`` table if it doesn't already exist.
+    Acquires its own connection from the global pool -- callers should
+    ``init_db_pool()`` first but do not need to hand a connection in.
     """
-    await db_conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS orders (
-            "Id" SERIAL PRIMARY KEY,
-            "Symbol" TEXT NOT NULL,
-            "Time" TIME WITHOUT TIME ZONE NOT NULL,
-            "Stop" NUMERIC(10, 2) NOT NULL,
-            "Date" DATE NOT NULL,
-            "Status" TEXT NOT NULL
-        );
-        """
-    )
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS orders (
+                "Id" SERIAL PRIMARY KEY,
+                "Symbol" TEXT NOT NULL,
+                "Time" TIME WITHOUT TIME ZONE NOT NULL,
+                "Stop" NUMERIC(10, 2) NOT NULL,
+                "Date" DATE NOT NULL,
+                "Status" TEXT NOT NULL
+            );
+            """
+        )
 
 
 

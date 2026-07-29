@@ -14,6 +14,11 @@ dispatch shape only:
   Refreshed from the DB every ``_ARMED_EXITS_TTL_SECONDS`` so
   newly-armed / disarmed rows take effect within a few seconds without
   hammering the DB on every candle.
+
+Named ``dispatcher_state`` (not just ``state``) so it doesn't collide
+with the per-strategy ``state.py`` files under ``orb_long/``,
+``reversal_long/``, etc. -- those hold per-strategy session state
+(fire latches, yesterday-level caches), which is a different concern.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 # Mapping {SYMBOL_UPPER: {strategy_name, ...}}. Empty by default -- set_*
-# is called from run_streamer() after loading from the DB.
+# is called from prepare_watchlist() after loading from the DB.
 _watchlist_strategies: Dict[str, Set[str]] = {}
 
 

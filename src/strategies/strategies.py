@@ -14,12 +14,12 @@ Two entry points:
   waiting for the next 2-min close would be too slow.
 
 Both are thin: cadence-specific input, look up the "allowed" set from
-``state``, iterate the matching registry, ``asyncio.gather`` the results.
-Adding a strategy = one line in ``registry.py``, not here.
+``dispatcher_state``, iterate the matching registry, ``asyncio.gather``
+the results. Adding a strategy = one line in ``registry.py``, not here.
 
 Re-exports ``set_watchlist_strategies`` / ``get_watchlist_strategies``
-from ``state`` so existing callers of ``from src.strategies import *``
-still find them.
+from ``dispatcher_state`` so existing callers of
+``from src.strategies import *`` still find them.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from src.strategies.registry import (
     EXIT_STRATEGIES,
     REALTIME_ENTRY_STRATEGIES,
 )
-from src.strategies.state import (  # re-exported for back-compat
+from src.strategies.dispatcher_state import (  # re-exported for back-compat
     get_armed_exits_for,
     get_watchlist_strategies,
     get_watchlist_strategies_for,
