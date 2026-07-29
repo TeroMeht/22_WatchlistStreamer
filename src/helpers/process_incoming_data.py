@@ -14,7 +14,7 @@ from .ibclient import *
 from src.strategies.strategies import *
 from src.strategies.orb_long.visualization import state as viz
 from src.strategies.reversal_long.visualization import state as reversal_viz
-from src.strategies.visualization import chart_state as candle_timeline
+from src.strategies import candle_timeline
 from src.core.config import settings
 from datetime import datetime
 from zoneinfo import ZoneInfo

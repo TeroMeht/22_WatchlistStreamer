@@ -1,29 +1,34 @@
-
-from src.helpers.ibclient import monitor_tickers
-from src.database.db_functions import archive_livestream_tables, delete_all_tables_db_async
-from src.alarms.send_postrequest import send_streamer_status
 import asyncio
 import logging
 import os
 
-from src.database.db_functions import *
-
-
-from src.helpers.utils import *
-from src.streamer.datavalidation import *
-from src.strategies.strategies import *
-
-from src.helpers.ibclient import *
-from src.helpers.handle_dataframes import *
-from src.helpers.process_incoming_data import CandleStore
-from src.database.watchlist import load_watchlist, create_watchlist_tables
-from src.database.exit_requests import load_armed_exit_strategies
-from src.strategies.visualization.dashboard import start_dashboard
-from src.strategies.orb_long.visualization import state as viz
-from src.strategies.orb_long import state as orb_strategy_state
-from src.strategies.reversal_long.visualization import state as reversal_viz
-from src.strategies.visualization import chart_state as candle_timeline
+from src.alarms.send_postrequest import send_streamer_status
 from src.core.config import settings
+from src.database.db_functions import (
+    archive_livestream_tables,
+    create_and_fill_avg_volume_tables_async,
+    create_and_fill_table_async,
+    delete_all_tables_db_async,
+)
+from src.database.exit_requests import load_armed_exit_strategies
+from src.database.watchlist import create_watchlist_tables, load_watchlist
+from src.helpers.handle_dataframes import (
+    handle_Atr_intraday_dataset,
+    handle_intraday_rvol_dataset,
+)
+from src.helpers.ibclient import (
+    fetch_history_daily,
+    fetch_intraday_volume_history,
+    monitor_tickers,
+)
+from src.helpers.process_incoming_data import CandleStore
+from src.strategies import candle_timeline
+from src.strategies.orb_long import state as orb_strategy_state
+from src.strategies.orb_long.visualization import state as viz
+from src.strategies.reversal_long.visualization import state as reversal_viz
+from src.strategies.state import set_watchlist_strategies
+from src.strategies.visualization.dashboard import start_dashboard
+from src.streamer.datavalidation import validate_datasets
 
 
 async def run_streamer(ib):
@@ -124,12 +129,7 @@ async def run_streamer(ib):
         logging.error(" No valid tickers found in all datasets. Aborting.")
         return
 
-    valid_results = {"intraday": [], "daily": [],"volume": []}
 
-    for df_list, key in zip([today_intradaydata, daily_data, past_intradaydata], ["intraday", "daily", "volume"]):
-        for df in df_list:
-            if df is not None and not df.empty and df['Symbol'].iloc[0] in valid_tickers:
-                valid_results[key].append(df)
 
     rvol_dataset = handle_intraday_rvol_dataset(today_intradaydata,past_intradaydata)
     relatr_datasets, last_atr_dict = handle_Atr_intraday_dataset(rvol_dataset, daily_data)
@@ -184,8 +184,13 @@ async def run_streamer(ib):
     # --- Determine and log dropped tickers ---
     dropped_tickers = [t for t in tickers if t not in valid_tickers]
 
+    if dropped_tickers:
+        logging.warning(
+            "Dropped %d tickers due to missing datasets: %s",
+            len(dropped_tickers),
+            ", ".join(dropped_tickers),
+        )
 
-    logging.warning(f"Dropped tickers: {dropped_tickers}")
     logging.info("Starting live monitoring...")
 
     # --- Start live monitoring tasks ---#

@@ -1,37 +1,35 @@
 """
-Shared per-symbol candle timeline for all entry-strategy dashboards.
+Shared per-symbol candle timeline -- domain state, not viz state.
 
-Every strategy displays the SAME underlying 2-min candle series (they
-all read from the same ``{symbol}_livestream`` table). Instead of each
-strategy's viz module maintaining a duplicate copy, they share one
-per-symbol timeline stored here. Strategy-specific overlay state
-(reference lines, fires, per-strategy metrics) still lives in each
-strategy's own ``visualization/state.py``.
+Every strategy operates on the SAME underlying 2-min candle series (they
+all read from the same ``{symbol}_livestream`` table). Rather than
+re-hitting the DB on every 5-sec tick or duplicating the tail per
+strategy, we keep one in-memory timeline here that:
 
-Writers exposed here:
+    * ``seed_from_history`` fills at streamer startup from the pre-loaded
+      historical 2-min candles.
+    * ``record_finalized_2min_candle`` appends to whenever
+      ``finalize_candle`` writes a new row to the DB.
+    * ``record_5s_tick`` updates the *current* in-progress 2-min candle
+      from each live 5-sec bar plus tracks the last tick time / close.
 
-    record_5s_tick(symbol, bar_dt, open_, high, low, close)
-        Called on every 5-sec bar. Updates the *current* in-progress
-        2-min candle in place plus ``last_bar_time`` / ``last_bar_close``.
-    record_finalized_2min_candle(symbol, candle_dt, open_, high, low, close)
-        Called from ``finalize_candle`` when a 2-min row is written to
-        the DB. Appends to the completed series (idempotent for the
-        tail row).
-    seed_from_history(symbol, rows)
-        Bulk-seed at streamer startup from the pre-loaded historical
-        2-min candles.
+Both strategy code (``breakout_level.get_reference_from_last_two_candles``)
+and the viz layer read from here. The dependency arrow points
+strategy_logic -> candle_timeline and viz -> candle_timeline; viz never
+sits between the two.
 
-Readers:
+Readers exposed:
 
+    get_last_finalized_candles(symbol, n)
+        Tail of finalized 2-min candles as dicts (dt/open/high/low/close).
+        Cheap: list slice + tiny dict rebuild. Safe on the per-tick path.
     get_view(symbol) -> dict with keys candles, last_bar_time, last_bar_close
-    known_symbols() -> set of symbols with any candle data
+        The rendering-friendly view used by the dashboard.
+    known_symbols() -> set of symbols with any candle data.
 
 All writes are synchronous and cheap so they can safely live inside the
 hot per-bar path. Everything runs on the streamer's asyncio loop, so no
 locks are needed.
-
-Constants also re-exported here for strategies that need them:
-    MAX_CANDLES_PER_SYMBOL, STATE_* (state indicators)
 """
 
 from __future__ import annotations
@@ -77,14 +75,6 @@ def now_iso() -> str:
 # Cap on the number of 2-min candles retained per symbol. 240 = 8 hours
 # of 2-min candles -- comfortably covers a full RTH + extended-hours day.
 MAX_CANDLES_PER_SYMBOL: int = 240
-
-# State indicators the dashboard renders. Per-strategy overlay state
-# stores its own current value; the constants themselves are shared so
-# callers don't diverge.
-STATE_WARMING_UP: str = "warming_up"
-STATE_SEARCHING: str = "searching"
-STATE_BREAKOUT: str = "breakout"
-STATE_MUTED: str = "muted"
 
 
 # =============================================================================
@@ -234,6 +224,35 @@ def get_view(symbol: str) -> dict:
 def known_symbols() -> set:
     """Set of symbols that have any candle data (historical or live)."""
     return set(_timelines.keys())
+
+
+def get_last_finalized_candles(symbol: str, n: int) -> list[dict]:
+    """
+    Return the last ``n`` FINALIZED 2-min candles for ``symbol`` from
+    the in-memory timeline (the same store that ``record_finalized_2min_candle``
+    and ``seed_from_history`` write into). Each entry is a dict:
+
+        {"dt": datetime, "open": float, "high": float,
+         "low": float, "close": float}
+
+    Returns an empty list if the timeline holds fewer than ``n`` candles.
+    Cheap enough (list slice + tiny dict rebuild) to sit inside per-tick
+    strategy paths -- callers should prefer this over hitting the DB for
+    rolling-window references.
+    """
+    tl = _timelines.get(symbol.upper())
+    if tl is None or len(tl.candles_2min) < n:
+        return []
+    return [
+        {
+            "dt": datetime.fromisoformat(c["t"]),
+            "open": c["o"],
+            "high": c["h"],
+            "low":  c["l"],
+            "close": c["c"],
+        }
+        for c in tl.candles_2min[-n:]
+    ]
 
 
 def reset() -> None:

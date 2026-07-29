@@ -5,12 +5,11 @@ One shared entry point every fire path calls after the strategy has
 decided to fire (Phase 3 confirmed a breakout AND a stop level has been
 computed). Runs the full ceremony end-to-end:
 
-    1. hooks.on_breakout(symbol)   -- flip viz state to BREAKOUT
-    2. build a CandleRow from the 5-sec bar
-    3. send the signal alarm        (Telegram + alarms row)
-    4. insert the entry order       (orders row)
-    5. hooks.on_fire(...)           -- viz fire marker + stop line
-    6. mark_fired(symbol)           -- one-shot latch until restart
+    1. build a CandleRow from the 5-sec bar
+    2. send the signal alarm        (Telegram + alarms row)
+    3. insert the entry order       (orders row)
+    4. hooks.on_fire(...)           -- viz fire marker + stop line
+    5. mark_fired(symbol)           -- one-shot latch until restart
 
 Callers pass their strategy identity (``signal_name``, ``hooks``,
 ``mark_fired``) on every call -- there is no factory / binding step.
@@ -48,7 +47,6 @@ async def fire_signal(
     docstring for the step-by-step sequence.
     """
     live_price = float(incoming_data_stream.close)
-    hooks.on_breakout(symbol)
 
     candle = stream_data_to_candle_row(symbol, incoming_data_stream, bar_time_local)
     await generate_signal_alarm(candle=candle, signal_name=signal_name)

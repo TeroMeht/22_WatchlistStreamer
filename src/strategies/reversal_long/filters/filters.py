@@ -94,7 +94,7 @@ def _format(results: List[FilterResult]) -> str:
 async def evaluate_filters(symbol: str) -> Tuple[bool, str]:
 
     results = [
-        await check_recent_capitulation(symbol),
+        #await check_recent_capitulation(symbol),
     ]
     
     return all(r.passed for r in results), _format(results)

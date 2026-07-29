@@ -5,10 +5,12 @@ Two builders live here; each strategy imports and calls whichever one
 fits its setup:
 
     * ``get_reference_from_last_two_candles(symbol)`` -- derives the
-      breakout level from the LAST TWO 2-min candles in
-      ``{symbol}_livestream``. Rolling: re-reads every call, always
-      fresh. Handy for testing at any time of day and for strategies
-      whose level is a moving 2-bar high (e.g. reversal_long).
+      breakout level from the LAST TWO FINALIZED 2-min candles held in
+      ``candle_timeline`` (the domain-level in-memory store also read by
+      the dashboard viz layer).
+      Rolling: reflects whatever the two most recent finalized candles
+      are at call time; new finalizations shift the window on the next
+      call. Synchronous, no DB hit -- safe to call from every 5-sec tick.
 
     * ``get_reference_from_opening_range(symbol, day, or_start, or_end)``
       -- derives the breakout level from the OPENING RANGE: every 2-min
@@ -38,30 +40,36 @@ from datetime import date, time
 from types import SimpleNamespace
 from typing import Optional
 
-from src.database.db_functions import get_last_rows, get_session_rows
+from src.database.db_functions import get_session_rows
+from src.strategies import candle_timeline
 
 
-async def get_reference_from_last_two_candles(symbol: str) -> Optional[SimpleNamespace]:
+def get_reference_from_last_two_candles(symbol: str) -> Optional[SimpleNamespace]:
     """
-    Reference from the last two 2-min candles: highest High and lowest
-    Low across both. Returns ``None`` if fewer than 2 candles exist.
-    """
-    df_last = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=2)
+    Reference from the last two FINALIZED 2-min candles: highest High
+    and lowest Low across both. Returns ``None`` if fewer than 2 finalized
+    candles exist yet.
 
-    if df_last.empty or len(df_last) < 2:
+    Reads straight from ``candle_timeline`` (in-memory store populated
+    by ``seed_from_history`` at startup and ``record_finalized_2min_candle``
+    on every finalize). No DB call -- this runs on every 5-sec tick, so
+    the previous ``get_last_rows`` round-trip was pure duplication.
+    Synchronous; callers no longer ``await``.
+    """
+    candles = candle_timeline.get_last_finalized_candles(symbol, 2)
+    if len(candles) < 2:
         return None
 
-    idx_max_high = df_last["High"].idxmax()
-    source_row = df_last.loc[idx_max_high]
-    highest = float(source_row["High"])
-    lowest = float(df_last["Low"].min())
-    newest = df_last.iloc[-1]
+    max_high_candle = max(candles, key=lambda c: c["high"])
+    highest = float(max_high_candle["high"])
+    lowest = float(min(c["low"] for c in candles))
+    newest = candles[-1]
 
     return SimpleNamespace(
         symbol=symbol.upper(),
-        ref_time=source_row["Time"],       # timestamp of the max-high candle
-        ref_open=float(newest["Open"]),    # trigger-candle open, for green-candle filter
-        ref_close=highest,                  # legacy attribute name; here it's "level to watch"
+        ref_time=max_high_candle["dt"].time(),  # datetime.time of the max-high candle
+        ref_open=float(newest["open"]),          # trigger-candle open, for green-candle filter
+        ref_close=highest,                        # "level to watch" -- legacy attr name
         ref_low=lowest,
         ref_field="high",
     )

@@ -397,6 +397,7 @@ function createReversalCard(sym) {
     + '<div><div class="k">last 5s price</div><div class="v last-c">--</div></div>'
     + '<div><div class="k">2-bar high</div><div class="v ref-c">--</div></div>'
     + '<div><div class="k">ref 2m candle</div><div class="v ref-t">--</div></div>'
+    + '<div><div class="k">stop level</div><div class="v stop-v">--</div></div>'
     + '<div><div class="k">recent max Relatr</div><div class="v relatr">--</div></div>',
     '<div class="check chk-cap"><span class="box fail">&#10007;</span>'
       + '<span class="label">Relatr &gt;= capitulation threshold</span> <span class="detail">--</span></div>');
@@ -410,6 +411,8 @@ function updateReversalCard(card, sym) {
   q('.last-c').textContent = price != null ? price.toFixed(2) : '--';
   q('.ref-c').textContent = r.ref_close != null ? r.ref_close.toFixed(2) : '--';
   q('.ref-t').textContent = r.ref_time || '--';
+  const lf = (r.fires && r.fires.length) ? r.fires[r.fires.length - 1] : null;
+  q('.stop-v').textContent = (lf && lf.stop != null) ? lf.stop.toFixed(2) : '--';
   q('.relatr').textContent = r.recent_max_relatr != null ? r.recent_max_relatr.toFixed(2) : '--';
 
   const cap = META.reversal && META.reversal.capitulation_threshold;
@@ -429,13 +432,29 @@ function updateReversalCard(card, sym) {
     css('--breakout-line') || '#d85a30',
     (r.ref_field || 'ref') + ' ' + (r.ref_time ? r.ref_time.slice(0, 5) : '') + ' ');
 
+  // --- Stop line: dashed red at the most recent fire's stop level ---
+  const stop = (lf && lf.stop != null) ? lf.stop : null;
+  const stopSig = stop != null ? (stop + '|revstop') : null;
+  if (stopSig !== card.stopLineKey) {
+    if (card.stopLine) card.series.removePriceLine(card.stopLine);
+    card.stopLine = null; card.stopLineKey = null;
+    if (stop != null) {
+      card.stopLine = card.series.createPriceLine({
+        price: stop, color: css('--stop-line') || '#a32d2d',
+        lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true, title: 'stop',
+      });
+      card.stopLineKey = stopSig;
+    }
+  }
+
   const fires = r.fires || [];
   const sig = fires.length + '_' + (fires.length ? fires[fires.length - 1].ts : 0);
   if (sig !== card.lastFireSig) {
     card.series.setMarkers(fires.map(f => ({
       time: f.ts, position: 'belowBar',
       color: css('--fire-color') || '#3b6d11', shape: 'arrowUp',
-      text: 'FIRE @ ' + f.c.toFixed(2),
+      text: 'FIRE @ ' + f.c.toFixed(2) + (f.stop != null ? '  stop ' + f.stop.toFixed(2) : ''),
     })));
     card.lastFireSig = sig;
   }
