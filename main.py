@@ -2,11 +2,12 @@ import asyncio
 
 from src.common.logging_config import setup_logging
 from src.dependencies import close_db_pool
-from src.streamer.datastreamer import (
-    data_pipe,
+from src.streamer.datastreamer import data_pipe
+from src.streamer.startup import (
     initialize_app,
     prepare_database,
     prepare_watchlist,
+    register_monitor_set,
 )
 
 
@@ -25,12 +26,15 @@ async def main() -> None:
         # of the per-symbol livestream tables.
         await prepare_database()
 
-        # Assemble the monitor set from watchlist + armed-exit requests
-        # and push it to the strategy dispatcher. None means nothing to
-        # monitor -- bail before the pipeline starts.
+        # Assemble the monitor set from watchlist + armed-exit requests.
+        # None means nothing to monitor -- bail before the pipeline starts.
         monitor_set = await prepare_watchlist()
         if monitor_set is None:
             return
+
+        # Publish the assembled mapping to the strategy dispatcher so
+        # run_strategies() can filter per ticker.
+        register_monitor_set(monitor_set)
 
         # Data pipeline (fetch/validate/calc/warmup) + live streamer tail.
         await data_pipe(ib, monitor_set)

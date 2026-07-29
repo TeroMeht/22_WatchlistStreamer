@@ -1,32 +1,42 @@
+"""
+Ticker validation for the startup pipeline.
 
-import pandas as pd
+One public function: ``validate_tickers``. Takes the three symbol-keyed
+dicts produced by ``_fetch_history_data`` and returns the tickers that
+show up in all three, alongside those dicts narrowed to only the
+surviving tickers.
+
+Position-alignment / None-guarding are unnecessary here because
+``_fetch_history_data`` already drops failed fetches at the fetch
+boundary -- everything reaching this module is a real, non-empty
+DataFrame keyed by its Symbol.
+"""
+
+from __future__ import annotations
+
 import logging
-from typing import List
-
-
-
-# =============================================================================
-# ticker validation
-# =============================================================================
+from typing import Tuple
 
 
 def validate_tickers(
-    daily_data: list,
-    today_intradaydata: list,
-    past_intradaydata: list,
+    daily: dict,
+    today_intra: dict,
+    past_intra: dict,
     tickers: list,
-) -> list:
+) -> Tuple[list, dict, dict, dict]:
     """
-    Keep only tickers present in ALL THREE historical datasets. Anything
-    missing from one is unusable downstream (indicator calc joins across
-    all three), so it gets dropped. Dropped tickers are logged once as a
-    warning; the returned list preserves the input ordering.
-    """
-    found_intraday = validate_datasets(today_intradaydata, tickers, "2-min intraday")
-    found_daily    = validate_datasets(daily_data,          tickers, "14-day daily")
-    found_volume   = validate_datasets(past_intradaydata,   tickers, "5-day intraday")
+    Intersect the three fetch-result dicts. Returns:
+        ``(valid_tickers, daily, today_intra, past_intra)``
 
-    valid = [t for t in tickers if t in found_intraday and t in found_daily and t in found_volume]
+    * ``valid_tickers`` -- tickers present as keys in ALL THREE dicts,
+      ordered as they appear in the input ``tickers`` list.
+    * The three returned dicts are the input dicts narrowed to only the
+      valid tickers. Downstream calculators can iterate them without any
+      ``None`` / empty guards.
+
+    Dropped tickers are logged once as a single aggregate warning.
+    """
+    valid = [t for t in tickers if t in daily and t in today_intra and t in past_intra]
 
     dropped = [t for t in tickers if t not in valid]
     if dropped:
@@ -35,28 +45,9 @@ def validate_tickers(
             len(dropped), ", ".join(dropped),
         )
 
-    return valid
-
-
-
-# =============================================================================
-# dataset validation
-# =============================================================================
-
-
-def validate_datasets(df_list:List[pd.DataFrame], tickers:list, dataset_name:str) -> set:
-
-    found = set()
-
-    for df in df_list:
-        if df is not None and hasattr(df, "empty") and not df.empty:
-            col = "Symbol" 
-            if col:
-                found.update(df[col].unique())
-
-    missing = [t for t in tickers if t not in found]
-
-    if missing:
-        logging.warning(f"{dataset_name}: Missing symbols {missing}")
-
-    return found or set()   #  ensures it never returns None
+    return (
+        valid,
+        {t: daily[t]       for t in valid},
+        {t: today_intra[t] for t in valid},
+        {t: past_intra[t]  for t in valid},
+    )

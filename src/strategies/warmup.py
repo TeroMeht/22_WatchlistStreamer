@@ -24,7 +24,6 @@ The streamer just imports this and calls ``warmup_from_intraday`` +
 from __future__ import annotations
 
 import logging
-from typing import Iterable
 
 from src.strategies import candle_timeline
 from src.strategies.orb_long import state as orb_strategy_state
@@ -46,10 +45,9 @@ def warmup_from_intraday(relatr_datasets: dict) -> None:
           "recent capitulation" check reflects state at startup. The
           writer maintains a rolling window internally.
     """
+    # Upstream validate_tickers guarantees every frame here is non-empty.
     seeded = 0
     for symbol, df in relatr_datasets.items():
-        if df is None or df.empty:
-            continue
         candle_timeline.seed_from_history(symbol, df.to_dict(orient="records"))
         if "Rvol" in df.columns:
             orb_viz.record_rvol(symbol, float(df.iloc[-1]["Rvol"]))
@@ -63,16 +61,17 @@ def warmup_from_intraday(relatr_datasets: dict) -> None:
     )
 
 
-def warmup_from_daily(daily_data: Iterable) -> None:
+def warmup_from_daily(daily_data: dict) -> None:
     """
     Seed yesterday's RTH high + close per symbol from the daily-bars
     fetch into ORB's strategy state. The dashboard reads yesterday's
     values from there via ``viz.snapshot()`` so we don't keep two copies.
+
+    ``daily_data`` is a ``{symbol: DataFrame}`` mapping produced by
+    ``_fetch_history_data`` and narrowed by ``validate_tickers`` -- every
+    frame is guaranteed non-empty.
     """
-    for df in daily_data:
-        if df is None or df.empty:
-            continue
-        symbol = df["Symbol"].iloc[0]
+    for symbol, df in daily_data.items():
         yrow = df.iloc[-1]
         orb_strategy_state.record_yesterday_daily(
             symbol=symbol,
