@@ -24,6 +24,7 @@ from typing import Optional
 _yesterday_daily: dict[str, dict[str, float]] = {}
 
 
+
 def record_yesterday_daily(symbol: str, high: float, close: float) -> None:
     """Cache yesterday's RTH high and close for downstream filter checks."""
     _yesterday_daily[symbol.upper()] = {"high": float(high), "close": float(close)}

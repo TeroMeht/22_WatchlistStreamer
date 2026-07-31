@@ -328,7 +328,7 @@ async def run_replay(candle_store, last_atr_dict: dict, valid_tickers: list) -> 
         return
 
     logger.info(
-        "Starting replay: speed=%s symbols=%s",
+        "\n\nStarting replay: speed= %s symbols= %s",
         settings.REPLAY_SPEED, sorted(replays),
     )
     await asyncio.gather(*[

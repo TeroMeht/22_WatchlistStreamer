@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from typing import List, NamedTuple, Tuple
-
+import pandas as pd
 from src.core.config import settings
 from src.database.db_functions import get_last_rows
 
@@ -41,7 +41,7 @@ class FilterResult(NamedTuple):
 # =============================================================================
 
 
-async def check_rvol_gte(symbol: str, threshold: float) -> FilterResult:
+async def check_rvol_gte(df_last: pd.DataFrame,  threshold: float) -> FilterResult:
     """
     Pass when the most recent 2-min candle in ``{symbol}_livestream`` has
     ``Rvol >= threshold``. Uses the latest row available -- historical
@@ -50,13 +50,9 @@ async def check_rvol_gte(symbol: str, threshold: float) -> FilterResult:
     Fails (with a descriptive reason) when Rvol isn't yet available, the
     column is missing, or the value is below threshold.
     """
-    df_last = await get_last_rows(
-        table_name=f"{symbol.lower()}_livestream", num_rows=1,
-    )
+
     if df_last.empty:
         return FilterResult(False, "no 2m candle in livestream table yet")
-    if "Rvol" not in df_last.columns:
-        return FilterResult(False, "Rvol column missing from livestream table")
     rvol = float(df_last.iloc[-1]["Rvol"])
     if rvol < threshold:
         return FilterResult(False, f"Rvol={rvol:.2f} < {threshold:.2f}")
@@ -91,22 +87,26 @@ async def check_price_above_yesterday_close(symbol: str, current_price: float) -
     return FilterResult(True, f"price={current_price:.2f} > yclose={ycl:.2f}")
 
 
-async def check_reference_candle_green(breakout_level) -> FilterResult:
-    """
-    Pass when the reference candle's Close is higher than its Open
-    (a "green" candle body). Signals bullish structure in the opening
-    range. Not part of the default filter set -- enable by adding it to
-    ``evaluate_filters`` below.
-    """
-    if breakout_level.ref_close > breakout_level.ref_open:
+
+
+
+
+async def check_premarket_high(df_last: pd.DataFrame, current_price: float) -> FilterResult:
+
+    if df_last.empty:
+        return FilterResult(False, "no 2m candle in livestream table yet")
+
+    premarket_high = float(df_last["High"].max())
+    if current_price < premarket_high:
         return FilterResult(
-            True,
-            f"green candle: close={breakout_level.ref_close:.2f} > open={breakout_level.ref_open:.2f}",
+            False,
+            f"Price={current_price:.2f} < premarket high {premarket_high:.2f}",
         )
     return FilterResult(
-        False,
-        f"not green: close={breakout_level.ref_close:.2f} <= open={breakout_level.ref_open:.2f}",
+        True,
+        f"Price={current_price:.2f} >= premarket high {premarket_high:.2f}",
     )
+
 
 
 # =============================================================================
@@ -124,9 +124,11 @@ def _format(results: List[FilterResult]) -> str:
 
 async def evaluate_filters(symbol: str, current_price: float) -> Tuple[bool, str]:
 
+    df_last = await get_last_rows(table_name=f"{symbol.lower()}_livestream",num_rows=None)
+
     results = [
-        # await check_reference_candle_green(breakout_level),  # pass breakout_level as arg if enabled
-        await check_rvol_gte(symbol, settings.RVOL_THRESHOLD),
+        await check_premarket_high(df_last, current_price),
+        await check_rvol_gte(df_last, settings.RVOL_THRESHOLD),
         await check_price_above_yesterday_high(symbol, current_price),
         await check_price_above_yesterday_close(symbol, current_price),
     ]

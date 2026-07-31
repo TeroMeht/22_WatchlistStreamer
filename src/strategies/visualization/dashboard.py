@@ -320,7 +320,7 @@ function createOrbCard(sym) {
     + '<div><div class="k">stop level</div><div class="v stop-v">--</div></div>'
     + '<div><div class="k">latest Rvol</div><div class="v rvol">--</div></div>',
     '<div class="check chk-rvol"><span class="box fail">&#10007;</span>'
-      + '<span class="label">Rvol &gt; 3</span> <span class="detail">--</span></div>'
+      + '<span class="label">Rvol &gt; 1</span> <span class="detail">--</span></div>'
     + '<div class="check chk-yhi"><span class="box fail">&#10007;</span>'
       + '<span class="label">price &gt; yesterday high</span> <span class="detail">--</span></div>'
     + '<div class="check chk-ycl"><span class="box fail">&#10007;</span>'
@@ -340,7 +340,7 @@ function updateOrbCard(card, sym) {
 
   // --- ORB filter checks ---
   setCheck(card, 'chk-rvol',
-    o.latest_rvol != null && o.latest_rvol > 3,
+    o.latest_rvol != null && o.latest_rvol > 1,
     o.latest_rvol != null ? 'Rvol = ' + o.latest_rvol.toFixed(2) : 'Rvol = -- (no live 2m candle yet)');
   setCheck(card, 'chk-yhi',
     price != null && o.yesterday_high != null && price > o.yesterday_high,

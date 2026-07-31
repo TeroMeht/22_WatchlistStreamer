@@ -624,6 +624,34 @@ async def create_orders_table() -> None:
         )
 
 
+async def create_exit_requests_table() -> None:
+    """
+    Ensure the exit_requests table exists. The table keys on
+    (symbol, strategy) so a symbol may have multiple armed strategies at once
+    (e.g., trim at vwap_exit AND full exit at endofday_exit). Every row is
+    implicitly armed; to disarm a strategy the caller deletes the row.
+
+    Data must survive restarts (armed exits are the source of truth for the
+    strategy runner), so this uses CREATE IF NOT EXISTS — never DROP. Any
+    stale rows for symbols the portfolio no longer holds are cleaned up by
+    the "Reconcile exits" flow (services.exits.reconcile_exit_requests_with_positions).
+    """
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS exit_requests (
+            symbol TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            trim_percentage NUMERIC(5, 4) NOT NULL DEFAULT 1.0,
+            updated TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+            PRIMARY KEY (symbol, strategy)
+        );
+        """
+    )
+
+
+
 
 
 async def insert_order(candle: CandleRow, stop_level: float):

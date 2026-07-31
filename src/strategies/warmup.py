@@ -49,11 +49,13 @@ def warmup_from_intraday(relatr_datasets: dict) -> None:
     seeded = 0
     for symbol, df in relatr_datasets.items():
         candle_timeline.seed_from_history(symbol, df.to_dict(orient="records"))
-        if "Rvol" in df.columns:
-            orb_viz.record_rvol(symbol, float(df.iloc[-1]["Rvol"]))
-        if "Relatr" in df.columns:
-            for r in df["Relatr"].dropna().tail(reversal_viz.RECENT_RELATR_WINDOW):
-                reversal_viz.record_relatr(symbol, float(r))
+
+        # seed Rvol
+        orb_viz.record_rvol(symbol, float(df.iloc[-1]["Rvol"]))
+        # seed recent Relatr
+        for r in df["Relatr"].dropna().tail(reversal_viz.RECENT_RELATR_WINDOW):
+            reversal_viz.record_relatr(symbol, float(r))
+
         seeded += 1
     logging.debug(
         "Candle timeline seeded (%d symbols) + per-strategy overlays warmed up",

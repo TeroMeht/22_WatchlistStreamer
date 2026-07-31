@@ -33,6 +33,7 @@ from src.database.db_functions import (
     create_alarms_table,
     create_orders_table,
     delete_all_tables_db_async,
+    create_exit_requests_table
 )
 from src.database.exit_requests import load_armed_exit_strategies
 from src.database.watchlist import create_watchlist_tables, load_watchlist
@@ -88,6 +89,7 @@ async def prepare_database() -> None:
     await create_alarms_table()
     await create_orders_table()
     await create_watchlist_tables()
+    await create_exit_requests_table()
     # Skip archiving in replay mode: replay bars would otherwise pollute
     # bars_2m_archive with rows that look like real trading data. In
     # replay we're pointing at a separate DB anyway, so there's nothing
