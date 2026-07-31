@@ -79,7 +79,7 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
     breakout_level = await get_reference_from_opening_range(symbol, today, or_start=time(16, 30), or_end=time(16, 32))
 
     if breakout_level is None:
-        logger.debug(
+        logger.info(
             "ORB long: %s -- opening-range reference not available yet "
             "(LIVE 5s bar %s close=%.2f)",
             symbol, bar_time_local.time(), float(bar.close),
