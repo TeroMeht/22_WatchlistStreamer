@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from src.core.config import settings
 from src.database.db_functions import (
     create_and_fill_avg_volume_tables_async,
     create_and_fill_table_async,
@@ -29,6 +30,7 @@ from src.helpers.ibclient import (
 )
 from src.helpers.process_incoming_data import CandleStore
 from src.strategies import warmup
+from src.streamer import replay
 from src.streamer.datavalidation import validate_tickers
 
 
@@ -136,9 +138,22 @@ async def run_streamer(ib, valid_tickers: list, last_atr_dict: dict) -> None:
 
     ``last_atr_dict`` seeds each ticker's per-tick ATR helper --
     ``monitor_tickers`` refreshes it as new 2-min candles finalize.
+
+    When ``settings.MODE == "replay"`` this instead hands off to the
+    CSV replay driver, which feeds bars from disk through the same
+    ``process_bar`` pipeline. Everything up to this point (history
+    fetch, indicator warmup, DB seeding) still runs as normal so the
+    replay starts against the same in-memory state a live session would.
     """
-    logging.info("Starting live monitoring...")
     candle_store = CandleStore()
+
+    if settings.MODE == "replay":
+        logging.info("Starting replay mode (speed=%s, data_dir=%s)...",
+                     settings.REPLAY_SPEED, settings.REPLAY_DATA_DIR)
+        await replay.run_replay(candle_store, last_atr_dict, valid_tickers)
+        return
+
+    logging.info("Starting live monitoring...")
     await asyncio.gather(*[
         monitor_tickers(candle_store, last_atr_dict.get(t), ib, t)
         for t in valid_tickers

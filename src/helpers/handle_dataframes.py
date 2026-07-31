@@ -136,7 +136,12 @@ def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:s
     df["Date"] = pd.to_datetime(df["Date"]).dt.date
 
     # Step 5: Split today vs past
-    today = date.today()
+    # In replay mode "today" is the replay date (from the CSVs), not
+    # the wall-clock date -- otherwise the replay-day's premarket bars
+    # would end up bucketed into `df_past` and pollute the Rvol model.
+    # Local import to avoid a cycle (streamer -> helpers -> streamer).
+    from src.streamer.replay import get_effective_today
+    today = get_effective_today()
 
     df_today = df[df["Date"] == today].copy()
     df_past = df[df["Date"] != today].copy()

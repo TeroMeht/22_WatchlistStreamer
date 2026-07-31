@@ -98,11 +98,16 @@ async def delete_all_tables_db_async() -> None:
         pool = get_db_pool()
 
         async with pool.acquire() as conn:
-            # Optional safety check (still useful)
+            # Safety check: only wipe recognized streaming DBs.
+            # ``livestreaming`` is prod; ``livestreaming_replay`` is the
+            # replay-mode DB (see settings.REPLAY_DATABASE_URL). Any other
+            # DB name is refused so a misconfigured DSN can't nuke tables
+            # in an unrelated database.
             db_name = await conn.fetchval("SELECT current_database();")
-            if db_name not in ("livestreaming"):
+            if db_name not in ("livestreaming", "livestreaming_replay"):
                 logger.info(
-                    f"Aborting: database is '{db_name}', livestreaming'."
+                    f"Aborting: database is '{db_name}', expected "
+                    "'livestreaming' or 'livestreaming_replay'."
                 )
                 return
 

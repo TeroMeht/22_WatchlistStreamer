@@ -88,7 +88,12 @@ async def prepare_database() -> None:
     await create_alarms_table()
     await create_orders_table()
     await create_watchlist_tables()
-    await archive_livestream_tables()
+    # Skip archiving in replay mode: replay bars would otherwise pollute
+    # bars_2m_archive with rows that look like real trading data. In
+    # replay we're pointing at a separate DB anyway, so there's nothing
+    # to preserve across the wipe.
+    if settings.MODE != "replay":
+        await archive_livestream_tables()
     await delete_all_tables_db_async()
 
 

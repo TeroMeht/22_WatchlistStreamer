@@ -4,6 +4,7 @@ import logging
 import asyncio
 from datetime import datetime, timedelta
 from ib_async import *
+from src.core.config import settings
 from .process_incoming_data import process_bar
 from .handle_dataframes import *
 
@@ -21,11 +22,18 @@ async def fetch_history_daily(ib: IB, symbol: str):
     contract = Stock(symbol, "SMART", "USD")
     await ib.qualifyContractsAsync(contract)
 
-    # IB format: 'YYYYMMDD HH:MM:SS'
-    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d 23:59:59')
+    # Anchor "end of window" to the day BEFORE the replay's session in
+    # replay mode, otherwise wall-clock yesterday. IB format: 'YYYYMMDD HH:MM:SS'.
+    if settings.MODE == "replay":
+        # Local import so live mode never pulls the replay module.
+        from src.streamer.replay import get_replay_start_datetime
+        anchor_date = get_replay_start_datetime().date() - timedelta(days=1)
+    else:
+        anchor_date = (datetime.now() - timedelta(days=1)).date()
+    end_dt_str = anchor_date.strftime('%Y%m%d 23:59:59')
 
     bars = await ib.reqHistoricalDataAsync( contract,
-                                            endDateTime=yesterday,      # stop at yesterday
+                                            endDateTime=end_dt_str,     # stop at yesterday (or replay-1)
                                             durationStr="14 D",         # last 14 calendar days
                                             barSizeSetting="1 day",     # daily bars
                                             whatToShow="TRADES",
@@ -48,9 +56,22 @@ async def fetch_intraday_volume_history(ib: IB, symbol: str):
     contract = Stock(symbol, "SMART", "USD")
     await ib.qualifyContractsAsync(contract)
 
+    # Live mode: endDateTime="" means "now" per IB docs.
+    # Replay mode: end at the replay's session start (typically 16:30
+    # Helsinki = US market open) so the returned 5 days of 2-min bars
+    # stop right at the moment the replay picks up. Pass a tz-aware
+    # datetime -- ib_async converts it to the exact IB wire format,
+    # which is safer than hand-building a "YYYYMMDD HH:MM:SS <tz>"
+    # string (arbitrary IANA tz names aren't always accepted).
+    if settings.MODE == "replay":
+        from src.streamer.replay import get_replay_start_datetime
+        end_dt = get_replay_start_datetime()
+    else:
+        end_dt = ""
+
     bars = await ib.reqHistoricalDataAsync(
         contract,
-        endDateTime="",
+        endDateTime=end_dt,
         durationStr="5 D",
         barSizeSetting="2 mins",
         whatToShow="TRADES",
