@@ -1,6 +1,7 @@
 from src.database.db_functions import *
 import logging
 from src.core.config import settings
+from src.alarms.send_postrequest import send_entry_request_to_fastapi
 
 logger = logging.getLogger(__name__)  # module-specific logger
 
@@ -37,16 +38,26 @@ def detect_stoplevel(df: pd.DataFrame, direction: str) -> float:
 
 
 async def generate_entry_order(candle: CandleRow, stop_level: float) -> None:
+    """
+    Fire the automatic entry request to FastAPI. DB persistence of the
+    order is intentionally NOT done here -- the receiving service owns
+    that write; keeping it out of the streamer avoids double-writes and
+    means one failure mode instead of two.
+    """
     try:
-        # Insert active order to DB
-        await insert_order(candle=candle, stop_level=stop_level)
-        logger.info(
-            "Entry order inserted: symbol=%s date=%s time=%s stop=%.2f",
-            candle.symbol, candle.date, candle.time, stop_level,
+        await send_entry_request_to_fastapi(
+            candle=candle,
+            stop_level=stop_level,
+            fastapi_url=settings.ENTRY_REQUEST_ENDPOINT,
         )
     except Exception:
         logger.exception(
-            "Failed to insert entry order for symbol=%s date=%s time=%s stop=%s",
+            "Failed to POST entry request for symbol=%s date=%s time=%s stop=%s",
             candle.symbol, candle.date, candle.time, stop_level,
         )
         raise
+
+    logger.info(
+        "Entry request POSTed: symbol=%s date=%s time=%s stop=%.2f",
+        candle.symbol, candle.date, candle.time, stop_level,
+    )

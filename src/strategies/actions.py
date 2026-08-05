@@ -49,8 +49,9 @@ async def fire_signal(
     live_price = float(incoming_data_stream.close)
 
     candle = stream_data_to_candle_row(symbol, incoming_data_stream, bar_time_local)
-    await generate_signal_alarm(candle=candle, signal_name=signal_name)
     await generate_entry_order(candle=candle, stop_level=stop_level)
+    await generate_signal_alarm(candle=candle, signal_name=signal_name)
+    
 
     hooks.on_fire(
         symbol, bar_time_local, live_price,

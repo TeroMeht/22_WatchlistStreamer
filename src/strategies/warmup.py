@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 
+from src.core.config import settings
 from src.strategies import candle_timeline
 from src.strategies.orb_long import state as orb_strategy_state
 from src.strategies.orb_long.visualization import state as orb_viz
@@ -52,6 +53,14 @@ def warmup_from_intraday(relatr_datasets: dict) -> None:
 
         # seed Rvol
         orb_viz.record_rvol(symbol, float(df.iloc[-1]["Rvol"]))
+        # seed premarket high -- max High across strictly-premarket 2-min
+        # candles only (Time < session open). If the intraday frame has
+        # no premarket rows (e.g. weekend warmup, or session already
+        # started), skip -- the live updates will seed it if any
+        # premarket candles are still to come, otherwise it stays None.
+        pre_df = df[df["Time"] < settings.SESSION_START]
+        if not pre_df.empty:
+            orb_viz.record_premarket_high(symbol, float(pre_df["High"].max()))
         # seed recent Relatr
         for r in df["Relatr"].dropna().tail(reversal_viz.RECENT_RELATR_WINDOW):
             reversal_viz.record_relatr(symbol, float(r))

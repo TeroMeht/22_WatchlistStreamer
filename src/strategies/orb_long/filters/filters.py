@@ -96,7 +96,14 @@ async def check_premarket_high(df_last: pd.DataFrame, current_price: float) -> F
     if df_last.empty:
         return FilterResult(False, "no 2m candle in livestream table yet")
 
-    premarket_high = float(df_last["High"].max())
+    # Restrict to strictly-premarket rows (Time < session open). Without
+    # this the max would keep drifting up after the open and the filter
+    # would silently become "price >= running intraday high".
+    pre = df_last[df_last["Time"] < settings.SESSION_START]
+    if pre.empty:
+        return FilterResult(False, "no premarket 2m candles in livestream yet")
+
+    premarket_high = float(pre["High"].max())
     if current_price < premarket_high:
         return FilterResult(
             False,

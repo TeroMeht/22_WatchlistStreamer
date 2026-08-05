@@ -655,11 +655,15 @@ async def create_exit_requests_table() -> None:
 
 
 async def insert_order(candle: CandleRow, stop_level: float):
-    # Get database connection from pool
+    """
+    Insert one row into ``orders``. Raises on any failure so the caller
+    (``generate_entry_order``) can react -- do NOT swallow exceptions
+    here, otherwise gather(..., return_exceptions=True) sees None for
+    every call and the "Entry order inserted" log line lies.
+    """
     pool = get_db_pool()
-    conn = await pool.acquire()
 
-    try:
+    async with pool.acquire() as conn:
         # Ensure orders table exists (with id)
         create_table_query = """
         CREATE TABLE IF NOT EXISTS orders (
@@ -678,27 +682,28 @@ async def insert_order(candle: CandleRow, stop_level: float):
             VALUES ($1, $2, $3, $4, $5);
         """
 
-        await conn.execute(
-            insert_query,
-            candle.symbol,     # Symbol column
-            candle.time,       # Time column
-            stop_level,         # Stop column
-            candle.date,       # Date column
-            "active"           # Status column
-        )
+        try:
+            await conn.execute(
+                insert_query,
+                candle.symbol,     # Symbol column
+                candle.time,       # Time column
+                stop_level,        # Stop column
+                candle.date,       # Date column
+                "active"           # Status column
+            )
+        except Exception:
+            # Log with the row we tried to insert so the failure is
+            # actionable, then re-raise so the caller's error path fires.
+            logging.exception(
+                "insert_order failed: symbol=%s date=%s time=%s stop=%s",
+                candle.symbol, candle.date, candle.time, stop_level,
+            )
+            raise
 
         logging.info(
             "Order inserted: %s %s Stop: %.2f Status: active",
             candle.symbol, candle.time, stop_level
         )
-
-    except Exception as e:
-        logging.error("Error inserting order: %s", e)
-
-    finally:
-        # CHANGED: release connection back to pool
-        if conn:
-            await pool.release(conn)
 
 
 

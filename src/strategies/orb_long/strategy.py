@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 from ib_async import RealTimeBar
 
 from src.core.config import settings
+from src.database.db_functions import get_last_rows
 
 from src.strategies.actions import fire_signal
 from src.strategies.breakout_level import (
@@ -119,7 +120,19 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
 
 
     # --- Phase 4: detect stop level ---------------------------------------------
-    stop_level = round(breakout_level.ref_low - settings.ORB_STOP_OFFSET, 2)
+    # Stop sits below the low of the last COMPLETED candle in the livestream
+    # (the candle immediately preceding the trigger), not below the
+    # reference/opening-range low. Adapts to actual price action into the break.
+    df_last = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=1)
+    if df_last.empty:
+        logger.warning(
+            "ORB long: %s -- no prior candle in livestream to anchor stop; "
+            "falling back to breakout_level.ref_low", symbol,
+        )
+        stop_reference = float(breakout_level.ref_low)
+    else:
+        stop_reference = float(df_last["Low"].iloc[-1])
+    stop_level = round(stop_reference - settings.ORB_STOP_OFFSET, 2)
 
     # --- Phase 5: fire alarm and generate order ---------------------------------------------
     await fire_signal(

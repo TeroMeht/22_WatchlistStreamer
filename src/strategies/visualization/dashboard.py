@@ -97,6 +97,7 @@ def _merged_snapshot() -> dict:
                 "yesterday_high":  o.get("yesterday_high"),
                 "yesterday_close": o.get("yesterday_close"),
                 "latest_rvol":     o.get("latest_rvol"),
+                "premarket_high":  o.get("premarket_high"),
                 "fires":           o.get("fires", []),
             },
             "reversal": {
@@ -318,9 +319,12 @@ function createOrbCard(sym) {
     + '<div><div class="k">last 5s price</div><div class="v last-c">--</div></div>'
     + '<div><div class="k">ORB level</div><div class="v ref-c">--</div></div>'
     + '<div><div class="k">stop level</div><div class="v stop-v">--</div></div>'
-    + '<div><div class="k">latest Rvol</div><div class="v rvol">--</div></div>',
+    + '<div><div class="k">latest Rvol</div><div class="v rvol">--</div></div>'
+    + '<div><div class="k">premarket high</div><div class="v pmhi">--</div></div>',
     '<div class="check chk-rvol"><span class="box fail">&#10007;</span>'
       + '<span class="label">Rvol &gt; 1</span> <span class="detail">--</span></div>'
+    + '<div class="check chk-pmhi"><span class="box fail">&#10007;</span>'
+      + '<span class="label">price &gt;= premarket high</span> <span class="detail">--</span></div>'
     + '<div class="check chk-yhi"><span class="box fail">&#10007;</span>'
       + '<span class="label">price &gt; yesterday high</span> <span class="detail">--</span></div>'
     + '<div class="check chk-ycl"><span class="box fail">&#10007;</span>'
@@ -337,11 +341,17 @@ function updateOrbCard(card, sym) {
   const lf = (o.fires && o.fires.length) ? o.fires[o.fires.length - 1] : null;
   q('.stop-v').textContent = (lf && lf.stop != null) ? lf.stop.toFixed(2) : '--';
   q('.rvol').textContent = o.latest_rvol != null ? o.latest_rvol.toFixed(2) : '--';
+  q('.pmhi').textContent = o.premarket_high != null ? o.premarket_high.toFixed(2) : '--';
 
   // --- ORB filter checks ---
   setCheck(card, 'chk-rvol',
     o.latest_rvol != null && o.latest_rvol > 1,
     o.latest_rvol != null ? 'Rvol = ' + o.latest_rvol.toFixed(2) : 'Rvol = -- (no live 2m candle yet)');
+  setCheck(card, 'chk-pmhi',
+    price != null && o.premarket_high != null && price >= o.premarket_high,
+    (price != null && o.premarket_high != null)
+      ? ('price ' + price.toFixed(2) + '  vs  pmhi ' + o.premarket_high.toFixed(2))
+      : 'waiting for data');
   setCheck(card, 'chk-yhi',
     price != null && o.yesterday_high != null && price > o.yesterday_high,
     (price != null && o.yesterday_high != null)

@@ -50,6 +50,12 @@ class Settings(BaseSettings):
 
     TIMEZONE: str
     EXIT_REQUEST_ENDPOINT: str
+    # POST endpoint on the trade backend for automatic entry requests.
+    # The streamer fires this when a strategy's entry conditions trigger;
+    # the backend runs its guards (block window, attempts, cooldowns, ...)
+    # and parks the priced order for user acceptance via the FE dialog.
+    # request_type="automatic" in the payload is what routes it there.
+    ENTRY_REQUEST_ENDPOINT: str
     ALARMS_ENDPOINT: str
     STREAMER_START_ENDPOINT: str
 

@@ -117,6 +117,9 @@ async def finalize_candle(last_candle,
     )
     # Per-strategy overlays: metric each dashboard needs for its own checks.
     viz.record_rvol(symbol, db_ready_candle.rvol)            # ORB: Rvol > 3 check
+    viz.record_premarket_high(                                # ORB: price >= premarket high check
+        symbol, db_ready_candle.high, db_ready_candle.time,
+    )  # candle_time gates the update; post-open highs are ignored
     reversal_viz.record_relatr(symbol, db_ready_candle.relatR)  # reversal: recent-capitulation check
     # NOTE: the frontend live table now polls /api/livestream/latest on a
     # 10s interval, so we no longer push each finalized candle to FastAPI.

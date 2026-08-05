@@ -23,14 +23,14 @@ from pathlib import Path
 from ib_async import IB, Stock
 
 # ============ CONFIG ============
-SYMBOL      = "BE"
-DATE        = "2026-07-30"          # YYYY-MM-DD (local calendar date)
+SYMBOL      = "PLTR"
+DATE        = "2026-08-04"          # YYYY-MM-DD (local calendar date)
 EXCHANGE    = "SMART"
 CURRENCY    = "USD"
 
 HOST        = "127.0.0.1"
 PORT        = 4002                  # 7497 paper TWS, 7496 live TWS, 4002/4001 gateway
-CLIENT_ID   = 2
+CLIENT_ID   = 20
 
 USE_RTH     = True                  # True = regular trading hours only
 TIMEZONE    = "Europe/Helsinki"     # output timestamp tz (matches settings.TIMEZONE)
