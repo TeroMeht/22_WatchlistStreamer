@@ -36,8 +36,16 @@ async def send_telegram_message(symbol, time_obj, alarm_message):
     Send a formatted Telegram message asynchronously.
     Uses httpx.AsyncClient so the event loop is not blocked while
     waiting for the Telegram API response.
+
+    In replay mode (``settings.MODE == "replay"``) this is a no-op: the
+    payload is logged so strategy triggers are still verifiable, but no
+    HTTP call is made to Telegram.
     """
     message = format_telegram_message(symbol, time_obj, alarm_message)
+
+    if settings.MODE == "replay":
+        logger.info("[replay] would send Telegram: %s", message.replace("\n", " | "))
+        return {"ok": True, "replay": True}
 
     bot_token = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID
@@ -67,6 +75,10 @@ async def send_telegram_message(symbol, time_obj, alarm_message):
 
 
 async def send_telegram_picture(image_bytes, alarm_message: str) -> dict:
+
+    if settings.MODE == "replay":
+        logger.info("[replay] would send Telegram picture with caption: %s", alarm_message)
+        return {"ok": True, "replay": True}
 
     bot_token = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID

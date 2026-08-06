@@ -49,7 +49,7 @@ async def momentum_long_exit(candle: CandleRow):
         logging.info(f"{last_row['Symbol']}: EMA9 crossover down detected")
         # Check for euforia using the DataFrame
 
-        if detect_euforia(df_all, threshold=settings.CAPITULATION_THRESHOLD):
+        if detect_euforia(df_all, threshold=settings.EUFORIC_THRESHOLD):
             logger.debug("Euforia detected for symbol: %s. Generating exit signal", candle.symbol)
 
             await send_exit_request_to_fastapi(
@@ -57,6 +57,8 @@ async def momentum_long_exit(candle: CandleRow):
                 alarm_name="momentum_long_exit",
                 fastapi_url=settings.EXIT_REQUEST_ENDPOINT
             )
+        else:
+            logger.debug("No euforia detected for symbol: %s. No exit signal generated.", candle.symbol)
 
 
 async def momentum_short_exit(candle: CandleRow):
@@ -77,7 +79,8 @@ async def momentum_short_exit(candle: CandleRow):
                 alarm_name="momentum_short_exit",
                 fastapi_url=settings.EXIT_REQUEST_ENDPOINT
             )
-
+        else:
+            logger.debug("No capitulation detected for symbol: %s. No exit signal generated.", candle.symbol)
 
 async def endofday_exit_strategy(candle: CandleRow):
     logger.info("Running EoD exit for symbol: %s", candle.symbol)

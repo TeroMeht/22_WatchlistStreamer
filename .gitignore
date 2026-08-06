@@ -17,3 +17,6 @@ __pycache__/
 *$py.class
 
 tickers/
+
+# 5-sec bar log
+bars_5s.log

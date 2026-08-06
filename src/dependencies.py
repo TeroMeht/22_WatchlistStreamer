@@ -11,11 +11,25 @@ _db_pool: Optional[asyncpg.Pool] = None
 async def init_db_pool() -> asyncpg.Pool:
     """
     Initialize the global DB pool (idempotent).
+
+    In replay mode we point at ``REPLAY_DATABASE_URL`` so the replay run
+    never touches the live ``livestreaming`` database. Missing/empty
+    replay DSN in replay mode is a hard error -- silently falling back to
+    the prod DSN would let a replay run write into prod.
     """
     global _db_pool
     if _db_pool is None:
-        _db_pool = await asyncpg.create_pool(dsn=settings.DATABASE_URL)
-        logging.info("Database pool initialized")
+        if settings.MODE == "replay":
+            dsn = settings.REPLAY_DATABASE_URL
+            if not dsn:
+                raise RuntimeError(
+                    "MODE=replay but REPLAY_DATABASE_URL is empty. "
+                    "Set it in your .test.env before starting."
+                )
+        else:
+            dsn = settings.DATABASE_URL
+        _db_pool = await asyncpg.create_pool(dsn=dsn)
+        logging.info("Database pool initialized (mode=%s)", settings.MODE)
     return _db_pool
 
 

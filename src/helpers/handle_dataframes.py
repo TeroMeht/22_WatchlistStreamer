@@ -136,7 +136,12 @@ def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:s
     df["Date"] = pd.to_datetime(df["Date"]).dt.date
 
     # Step 5: Split today vs past
-    today = date.today()
+    # In replay mode "today" is the replay date (from the CSVs), not
+    # the wall-clock date -- otherwise the replay-day's premarket bars
+    # would end up bucketed into `df_past` and pollute the Rvol model.
+    # Local import to avoid a cycle (streamer -> helpers -> streamer).
+    from src.streamer.replay import get_effective_today
+    today = get_effective_today()
 
     df_today = df[df["Date"] == today].copy()
     df_past = df[df["Date"] != today].copy()
@@ -158,18 +163,19 @@ def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:s
 
 
 
-def build_last_atr_dict(daily_results_with_atr: List[pd.DataFrame]) -> Dict[str, float]:
-    return {df['Symbol'].iloc[0]: df['ATR'].iloc[-1] for df in daily_results_with_atr}
+def build_last_atr_dict(daily_with_atr: Dict[str, pd.DataFrame]) -> Dict[str, float]:
+    """Latest ATR per symbol from the daily-bars dict keyed by Symbol."""
+    return {symbol: df['ATR'].iloc[-1] for symbol, df in daily_with_atr.items()}
 
 def handle_Atr_intraday_dataset(
     intraday_results: dict[str, pd.DataFrame],
-    daily_results_with_atr: list[pd.DataFrame]
+    daily_with_atr: dict[str, pd.DataFrame],
 ) -> tuple[dict[str, pd.DataFrame], dict[str, float]]:
 
     relatr_datasets = {}
 
     # Build last ATR dictionary
-    last_atr_per_symbol = build_last_atr_dict(daily_results_with_atr)
+    last_atr_per_symbol = build_last_atr_dict(daily_with_atr)
 
     # Desired column order
     cols_order = [
@@ -177,12 +183,8 @@ def handle_Atr_intraday_dataset(
         'Volume', 'VWAP', 'EMA9', 'Avg_volume', 'Rvol', 'Relatr'
     ]
 
-    # Iterate over symbol, intraday_df pairs
+    # Upstream validate_tickers guarantees every frame here is non-empty.
     for symbol, intraday_df in intraday_results.items():
-        if intraday_df is None or intraday_df.empty:
-            logger.warning(f"Empty intraday DataFrame for {symbol}, skipping.")
-            continue
-
         # Calculate Relatr using the existing intraday DataFrame
         intraday_df = calculate_relatr(intraday_df, last_atr_per_symbol)
 
@@ -194,30 +196,31 @@ def handle_Atr_intraday_dataset(
 
     return relatr_datasets, last_atr_per_symbol
 
-def handle_intraday_rvol_dataset(intraday_results: list[pd.DataFrame], avg_volume_results_5d: list[pd.DataFrame]) -> pd.DataFrame:
-
+def handle_intraday_rvol_dataset(
+    today_intra: dict[str, pd.DataFrame],
+    past_intra:  dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    """
+    Join today's 2-min intraday frame against the 5-day average-volume
+    frame per symbol and compute Rvol. Both inputs are dicts keyed by
+    Symbol -- upstream ``validate_tickers`` guarantees the same key set
+    in both, so we just iterate one of them.
+    """
+    required_cols = ['Symbol', 'Time', 'Avg_volume']
     rvol_datasets = {}
 
-    for intraday_df, avg_volume_df in zip(intraday_results, avg_volume_results_5d):
-        if intraday_df is None or intraday_df.empty:
-            logger.warning("Empty intraday DataFrame, skipping.")
+    for symbol, intraday_df in today_intra.items():
+        avg_volume_df = past_intra[symbol]
+        missing = [c for c in required_cols if c not in avg_volume_df.columns]
+        if missing:
+            logger.error(f"Avg volume DataFrame for {symbol} missing columns: {missing}")
             continue
-        
-        symbol = intraday_df['Symbol'].iloc[0]
 
-        # Ensure avg_volume_df has the necessary columns
-        required_cols = ['Symbol', 'Time', 'Avg_volume']
-        for col in required_cols:
-            if col not in avg_volume_df.columns:
-                logger.error(f"Avg volume DataFrame for {symbol} missing column: {col}")
-                continue
-
-        # Merge intraday with avg volume on Symbol, Date, Time
         merged_df = pd.merge(
             intraday_df,
             avg_volume_df[required_cols],
             on=['Symbol', 'Time'],
-            how='left'
+            how='left',
         )
         merged_df = calculate_rvol(merged_df)
 

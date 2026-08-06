@@ -17,8 +17,8 @@ normalized tables:
 
 The 26_ReactFastApp UI is the writer (POST /api/watchlist). This module is the
 streamer's *reader*: load_watchlist() returns the {symbol: {strategies}} mapping
-that run_streamer() uses to decide which symbols to monitor and what each one
-is allowed to trigger.
+that prepare_watchlist() uses to decide which symbols to monitor and what each
+one is allowed to trigger.
 """
 from __future__ import annotations
 

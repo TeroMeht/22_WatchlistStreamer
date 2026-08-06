@@ -1,12 +1,14 @@
 import asyncio
-import logging
 
 from src.common.logging_config import setup_logging
-from src.dependencies import init_db_pool, get_db_pool, close_db_pool
-from src.streamer.datastreamer import run_streamer
-from src.database.db_functions import create_alarms_table, create_orders_table
-from src.core.config import settings
-from ib_async import IB
+from src.dependencies import close_db_pool
+from src.streamer.datastreamer import data_pipe
+from src.streamer.startup import (
+    initialize_app,
+    prepare_database,
+    prepare_watchlist,
+    register_monitor_set,
+)
 
 
 # 1. Setup logging first
@@ -14,29 +16,35 @@ setup_logging()
 
 
 async def main() -> None:
-    ib = IB()
-    await ib.connectAsync(
-        settings.IB_HOST,
-        settings.IB_PORT,
-        clientId=settings.IB_CLIENT_ID,
-    )
-
-    # Initialize global DB pool (ONCE) using validated DB config from .env
-    db_pool = await init_db_pool()
-
-    async with db_pool.acquire() as conn:
-        await create_alarms_table(conn)
-        await create_orders_table(conn)
-        logging.info("Tables ensured: alarms, orders")
-
+    ib = None
     try:
-        # Run main streamer logic
-        await run_streamer(ib)
+        # Process-level init: DB pool + IB connection + PID ping + dashboard.
+        # Returns the connected IB client we hand to data_pipe.
+        ib = await initialize_app()
+
+        # All DB table setup in one place: alarms/orders + archive+wipe
+        # of the per-symbol livestream tables.
+        await prepare_database()
+
+        # Assemble the monitor set from watchlist + armed-exit requests.
+        # None means nothing to monitor -- bail before the pipeline starts.
+        monitor_set = await prepare_watchlist()
+        if monitor_set is None:
+            return
+
+        # Publish the assembled mapping to the strategy dispatcher so
+        # run_strategies() can filter per ticker.
+        register_monitor_set(monitor_set)
+
+        # Data pipeline (fetch/validate/calc/warmup) + live streamer tail.
+        await data_pipe(ib, monitor_set)
 
     finally:
-        # Always close pool on shutdown
+        # Always close pool + disconnect on shutdown, whether the app
+        # initialized fully or bailed early.
         await close_db_pool()
-        ib.disconnect()
+        if ib is not None:
+            ib.disconnect()
 
 
 # --- Script execution ---

@@ -1,3 +1,5 @@
+import asyncio
+
 from src.database.db_functions import *
 from src.alarms.alarm_plotchart import plot_intraday_chart
 from src.alarms.send_telegram import *
@@ -34,14 +36,14 @@ async def generate_signal_alarm(candle: CandleRow, signal_name: str)-> None:
             await send_alarm_to_fastapi(candle=candle, alarm_message=signal_name, fastapi_url=settings.ALARMS_ENDPOINT)
 
 
-            #intraday_data = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=None)
-            # Create and show plot
+            # intraday_data = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=None)
+            # # Create and show plot
 
-            # Send photo
-           # fig = plot_intraday_chart(intraday_data)
+            # # Send photo
+            # fig = plot_intraday_chart(intraday_data)
 
-           # image_bytes = await asyncio.to_thread(pio.to_image, fig, format='png')
-           # await send_telegram_picture(image_bytes, alarm_message)  # Send directly to Telegram
+            # image_bytes = await asyncio.to_thread(pio.to_image, fig, format='png')
+            # await send_telegram_picture(image_bytes, alarm_message=signal_name)  # Send directly to Telegram
             
             # # Send ONLY message (no picture)
             await send_telegram_message(
