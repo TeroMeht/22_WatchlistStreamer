@@ -6,8 +6,9 @@ strategies (and their dashboard cards) want to reflect from tick #1:
 
     * intraday history -- 2-min bars enriched with Rvol/Relatr, ONE
       DataFrame per symbol keyed by SYMBOL. Feeds the shared candle
-      timeline plus each strategy's per-symbol dashboard metric (ORB's
-      latest Rvol, reversal's recent max Relatr).
+      timeline only. Both strategies' filter values are computed live
+      in their respective ``filters.evaluate_filters`` on every 5-sec
+      tick, so nothing else is seeded here.
 
     * daily history -- one DataFrame per symbol with the last 14 daily
       bars ending yesterday (useRTH=True). The LAST row is yesterday's
@@ -25,51 +26,25 @@ from __future__ import annotations
 
 import logging
 
-from src.core.config import settings
 from src.strategies import candle_timeline
 from src.strategies.orb_long import state as orb_strategy_state
-from src.strategies.orb_long.visualization import state as orb_viz
-from src.strategies.reversal_long.visualization import state as reversal_viz
 
 
 def warmup_from_intraday(relatr_datasets: dict) -> None:
     """
     Seed the shared candle timeline with each symbol's historical 2-min
-    bars and warm up per-strategy dashboard metrics from the same frame.
-    Live 5-sec ticks will animate the next candle after these;
-    ``finalize_candle`` keeps appending as the session runs.
-
-    Per-strategy warmup:
-        * ORB -- last row's Rvol so the "Rvol > 3" check has a value on
-          load.
-        * reversal_long -- tail of the historical Relatr column so the
-          "recent capitulation" check reflects state at startup. The
-          writer maintains a rolling window internally.
+    bars. Live 5-sec ticks will animate the next candle after these;
+    ``finalize_candle`` keeps appending as the session runs. Both ORB
+    and reversal cards render filter rows only, and those are populated
+    by the respective strategy on the first 5-sec tick after warmup via
+    ``viz.record_filter_results`` -- nothing else to seed here.
     """
     # Upstream validate_tickers guarantees every frame here is non-empty.
     seeded = 0
     for symbol, df in relatr_datasets.items():
         candle_timeline.seed_from_history(symbol, df.to_dict(orient="records"))
-
-        # seed Rvol
-        orb_viz.record_rvol(symbol, float(df.iloc[-1]["Rvol"]))
-        # seed premarket high -- max High across strictly-premarket 2-min
-        # candles only (Time < session open). If the intraday frame has
-        # no premarket rows (e.g. weekend warmup, or session already
-        # started), skip -- the live updates will seed it if any
-        # premarket candles are still to come, otherwise it stays None.
-        pre_df = df[df["Time"] < settings.SESSION_START]
-        if not pre_df.empty:
-            orb_viz.record_premarket_high(symbol, float(pre_df["High"].max()))
-        # seed recent Relatr
-        for r in df["Relatr"].dropna().tail(reversal_viz.RECENT_RELATR_WINDOW):
-            reversal_viz.record_relatr(symbol, float(r))
-
         seeded += 1
-    logging.debug(
-        "Candle timeline seeded (%d symbols) + per-strategy overlays warmed up",
-        seeded,
-    )
+    logging.debug("Candle timeline seeded (%d symbols)", seeded)
 
 
 def warmup_from_daily(daily_data: dict) -> None:

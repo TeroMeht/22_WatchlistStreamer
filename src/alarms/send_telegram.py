@@ -43,9 +43,9 @@ async def send_telegram_message(symbol, time_obj, alarm_message):
     """
     message = format_telegram_message(symbol, time_obj, alarm_message)
 
-    if settings.MODE == "replay":
-        logger.info("[replay] would send Telegram: %s", message.replace("\n", " | "))
-        return {"ok": True, "replay": True}
+    # if settings.MODE == "replay":
+    #     logger.info("[replay] would send Telegram: %s", message.replace("\n", " | "))
+    #     return {"ok": True, "replay": True}
 
     bot_token = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID

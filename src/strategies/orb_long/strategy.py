@@ -18,6 +18,15 @@ Fire semantics (current build):
       reference and stop lines stay in place on the chart at their
       fire-time values because subsequent bars still animate the
       candle series but skip every hook that would move the levels.
+    * Stop anchor: LOW OF DAY -- lowest ``Low`` across every 2-min bar
+      in ``{symbol}_livestream`` since ``settings.SESSION_START``,
+      folded with the current 5-sec bar's low so an in-progress bar
+      that just printed a new LOD is caught before finalization.
+
+Phase order is deliberate: filter evaluation runs BEFORE the reference
+availability check so the dashboard populates its filter rows from the
+very first 5-sec tick after warmup -- users don't want to stare at
+"waiting for first tick" until the opening range completes at 16:32.
 """
 
 from __future__ import annotations
@@ -29,7 +38,7 @@ from zoneinfo import ZoneInfo
 from ib_async import RealTimeBar
 
 from src.core.config import settings
-from src.database.db_functions import get_last_rows
+from src.database.db_functions import get_session_rows
 
 from src.strategies.actions import fire_signal
 from src.strategies.breakout_level import (
@@ -38,7 +47,7 @@ from src.strategies.breakout_level import (
 )
 from src.strategies.detection import detect_breakout
 from src.strategies.hooks import make_hooks
-from .filters.filters import evaluate_filters
+from .filters.filters import evaluate_filters, format_summary
 from .state import has_fired, mark_fired
 from .visualization import state as viz
 
@@ -74,7 +83,15 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
         )
         return
 
-    # --- Phase 1: reference selection ---------------------------------------
+    # --- Phase 1: setup filters --------------------------------------------
+    # Run and publish BEFORE the reference check so the dashboard card
+    # populates from tick #1, not from tick #1 that arrives after the
+    # opening range completes at 16:32.
+    filters_passed, filter_results = await evaluate_filters(symbol, float(bar.close))
+    viz.record_filter_results(symbol, filter_results)
+    filters_summary = format_summary(filter_results)
+
+    # --- Phase 2: reference selection ---------------------------------------
     # breakout_level = await get_reference_from_last_two_candles(symbol)
 
     breakout_level = await get_reference_from_opening_range(symbol, today, or_start=time(16, 30), or_end=time(16, 32))
@@ -82,17 +99,14 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
     if breakout_level is None:
         logger.info(
             "ORB long: %s -- opening-range reference not available yet "
-            "(LIVE 5s bar %s close=%.2f)",
-            symbol, bar_time_local.time(), float(bar.close),
+            "(LIVE 5s bar %s close=%.2f) | %s",
+            symbol, bar_time_local.time(), float(bar.close), filters_summary,
         )
         return
 
     hooks.on_reference(symbol, breakout_level)
 
-    # --- Phase 2: setup filters --------------------------------------------
-
-    filters_passed, filters_summary = await evaluate_filters(symbol, float(bar.close))
-
+    # --- Phase 3: filter gate ----------------------------------------------
     if not filters_passed:
         logger.info(
             "ORB long: %s -- Incoming livestream %s price=%.2f | Breakout level %s "
@@ -104,7 +118,7 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
         )
         return
 
-    # --- Phase 3: breakout detection ---------------------------------------
+    # --- Phase 4: breakout detection ---------------------------------------
     event = detect_breakout(float(bar.close), breakout_level.ref_close)
     logger.info(
         "ORB long: %s -- Incoming livestream %s price=%.2f | Breakout level %s "
@@ -119,22 +133,31 @@ async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
         return
 
 
-    # --- Phase 4: detect stop level ---------------------------------------------
-    # Stop sits below the low of the last COMPLETED candle in the livestream
-    # (the candle immediately preceding the trigger), not below the
-    # reference/opening-range low. Adapts to actual price action into the break.
-    df_last = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=1)
-    if df_last.empty:
+    # --- Phase 5: detect stop level ---------------------------------------------
+    # Stop sits below the LOW OF DAY: the lowest ``Low`` across every
+    # 2-min bar in ``{symbol}_livestream`` since ``settings.SESSION_START``
+    # (default 16:30). The DB query is already filtered to today +
+    # since_time, so ``df["Low"].min()`` is the session low across
+    # finalized 2-min bars. We also fold in the current 5-sec ``bar.low``
+    # -- the in-progress 2-min bar hasn't been finalized to the DB yet,
+    # so if this tick just printed a new session low the DB min alone
+    # would still point at the previous LOD.
+    df_session = await get_session_rows(
+        table_name=f"{symbol.lower()}_livestream",
+        day=today,
+        since_time=settings.SESSION_START,
+    )
+    if df_session.empty:
         logger.warning(
-            "ORB long: %s -- no prior candle in livestream to anchor stop; "
+            "ORB long: %s -- no session bars in livestream to anchor stop; "
             "falling back to breakout_level.ref_low", symbol,
         )
         stop_reference = float(breakout_level.ref_low)
     else:
-        stop_reference = float(df_last["Low"].iloc[-1])
+        stop_reference = min(float(df_session["Low"].min()), float(bar.low))
     stop_level = round(stop_reference - settings.ORB_STOP_OFFSET, 2)
 
-    # --- Phase 5: fire alarm and generate order ---------------------------------------------
+    # --- Phase 6: fire alarm and generate order ---------------------------------------------
     await fire_signal(
         bar, symbol, breakout_level, bar_time_local, stop_level,
         signal_name=ORB_LONG_SIGNAL_NAME,

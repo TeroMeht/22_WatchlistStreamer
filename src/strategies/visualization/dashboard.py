@@ -11,10 +11,6 @@ Merged snapshot shape returned by ``/api/state``:
 
     {
       "generated_at": "...",
-      "meta": {
-        "orb":      {},
-        "reversal": {"capitulation_threshold": 3.0, "recent_relatr_window": 3}
-      },
       "symbols": [
         {
           "symbol": "DFNS",
@@ -22,13 +18,18 @@ Merged snapshot shape returned by ``/api/state``:
           "last_bar_time": "...",
           "last_bar_close": 6.20,
           "orb":      { ref_close, ref_low, ref_time, ref_field,
-                        yesterday_high, yesterday_close, latest_rvol, fires },
+                        yesterday_high, yesterday_close, filters, fires },
           "reversal": { ref_close, ref_low, ref_time, ref_field,
-                        recent_max_relatr, fires }
+                        filters, fires }
         },
         ...
       ]
     }
+
+    Both ``orb.filters`` and ``reversal.filters`` are lists of
+    ``{id, label, passed, detail}`` dicts -- the JS renders one check
+    row per entry, so add/remove/rethreshold a filter server-side and
+    the UI follows on the next poll with no JS edit.
 
 Adding a new strategy's data pipe:
     1. Import its viz ``state`` module here; add its symbol-level fields
@@ -94,10 +95,17 @@ def _merged_snapshot() -> dict:
                 "ref_close":       o.get("ref_close"),
                 "ref_low":         o.get("ref_low"),
                 "ref_field":       o.get("ref_field"),
+                # ``filters`` is the full list of active filter results
+                # (id, label, passed, detail) that filters.py produced on
+                # the last tick. The JS renders one row per entry -- add
+                # a filter server-side and it shows up here with no JS
+                # edit. ``yesterday_high`` / ``yesterday_close`` are kept
+                # in the snapshot for anything else that wants them, but
+                # the ORB card itself no longer renders info tiles for
+                # filter values -- the check rows carry them.
                 "yesterday_high":  o.get("yesterday_high"),
                 "yesterday_close": o.get("yesterday_close"),
-                "latest_rvol":     o.get("latest_rvol"),
-                "premarket_high":  o.get("premarket_high"),
+                "filters":         o.get("filters", []),
                 "fires":           o.get("fires", []),
             },
             "reversal": {
@@ -105,20 +113,15 @@ def _merged_snapshot() -> dict:
                 "ref_close":         r.get("ref_close"),
                 "ref_low":           r.get("ref_low"),
                 "ref_field":         r.get("ref_field"),
-                "recent_max_relatr": r.get("recent_max_relatr"),
+                # Same shape as ``orb.filters`` -- see snapshot docstring
+                # at the top of this file.
+                "filters":           r.get("filters", []),
                 "fires":             r.get("fires", []),
             },
         })
 
     return {
         "generated_at": _now_iso(),
-        "meta": {
-            "orb": {},
-            "reversal": {
-                "capitulation_threshold": rev_snap.get("capitulation_threshold"),
-                "recent_relatr_window":   rev_snap.get("recent_relatr_window"),
-            },
-        },
         "symbols": merged,
     }
 
@@ -207,7 +210,6 @@ _DASHBOARD_HTML = r"""<!doctype html>
 // Keyed by "<strategy>:<symbol>" so ORB and reversal cards for the same
 // symbol coexist in the single grid without stomping each other.
 const cards = {};
-let META = { orb: {}, reversal: {} };
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -215,28 +217,12 @@ async function poll() {
   try {
     const r = await fetch('/api/state', {cache: 'no-store'});
     const data = await r.json();
-    if (data.meta) META = data.meta;
     document.getElementById('stamp').textContent = 'as of ' + data.generated_at;
     render(data);
   } catch (e) {
     document.getElementById('stamp').textContent = 'connection lost';
   }
   setTimeout(poll, 1000);
-}
-
-function setCheck(card, cls, ok, detail, label) {
-  const row = card.element.querySelector('.' + cls);
-  if (!row) return;
-  const box = row.querySelector('.box');
-  if (ok === true) {
-    row.classList.remove('fail'); row.classList.add('ok');
-    box.className = 'box ok'; box.innerHTML = '&#10003;';
-  } else {
-    row.classList.remove('ok'); row.classList.add('fail');
-    box.className = 'box fail'; box.innerHTML = '&#10007;';
-  }
-  row.querySelector('.detail').textContent = detail;
-  if (label) row.querySelector('.label').textContent = label;
 }
 
 function upsertLine(card, key, current, colour, title) {
@@ -314,21 +300,58 @@ function updateChartCandles(card, sym) {
 // -----------------------------------------------------------------------
 
 function createOrbCard(sym) {
+  // Info grid keeps only the strategy-level facts (tick + reference +
+  // stop). Filter values now live in the check rows below and no longer
+  // need duplicate tiles up top. The .checks container starts empty --
+  // rows are built on the first poll from ``sym.orb.filters``.
   return baseCard(sym, 'ORB long', 'orb-tag',
     '<div><div class="k">last 5s tick</div><div class="v last-t">--</div></div>'
     + '<div><div class="k">last 5s price</div><div class="v last-c">--</div></div>'
     + '<div><div class="k">ORB level</div><div class="v ref-c">--</div></div>'
-    + '<div><div class="k">stop level</div><div class="v stop-v">--</div></div>'
-    + '<div><div class="k">latest Rvol</div><div class="v rvol">--</div></div>'
-    + '<div><div class="k">premarket high</div><div class="v pmhi">--</div></div>',
-    '<div class="check chk-rvol"><span class="box fail">&#10007;</span>'
-      + '<span class="label">Rvol &gt; 1</span> <span class="detail">--</span></div>'
-    + '<div class="check chk-pmhi"><span class="box fail">&#10007;</span>'
-      + '<span class="label">price &gt;= premarket high</span> <span class="detail">--</span></div>'
-    + '<div class="check chk-yhi"><span class="box fail">&#10007;</span>'
-      + '<span class="label">price &gt; yesterday high</span> <span class="detail">--</span></div>'
-    + '<div class="check chk-ycl"><span class="box fail">&#10007;</span>'
-      + '<span class="label">price &gt; yesterday close</span> <span class="detail">--</span></div>');
+    + '<div><div class="k">stop level</div><div class="v stop-v">--</div></div>',
+    '');
+}
+
+function renderFilterChecks(card, filters) {
+  // Rebuild the row skeleton only when the set of filter ids changes.
+  // Every poll after that only mutates the class/text of existing rows,
+  // which keeps the DOM stable and avoids reflow. Signature is prefixed
+  // with "-" for the empty state so it doesn't collide with a real
+  // (empty-string) join on some future filter list.
+  const container = card.element.querySelector('.checks');
+  if (!filters.length) {
+    const sig = '__empty__';
+    if (sig !== card.filtersSig) {
+      container.innerHTML = '<div class="check fail">'
+        + '<span class="box fail">&#10007;</span>'
+        + '<span class="label">filters</span>'
+        + '<span class="detail">waiting for first tick</span>'
+        + '</div>';
+      card.filtersSig = sig;
+    }
+    return;
+  }
+  const sig = filters.map(f => f.id).join('|');
+  if (sig !== card.filtersSig) {
+    container.innerHTML = filters.map(f =>
+      '<div class="check" data-id="' + f.id + '">'
+        + '<span class="box"></span>'
+        + '<span class="label"></span>'
+        + '<span class="detail"></span>'
+      + '</div>').join('');
+    card.filtersSig = sig;
+  }
+  filters.forEach(f => {
+    const row = container.querySelector('[data-id="' + f.id + '"]');
+    if (!row) return;
+    const ok = !!f.passed;
+    row.className = 'check ' + (ok ? 'ok' : 'fail');
+    const box = row.querySelector('.box');
+    box.className = 'box ' + (ok ? 'ok' : 'fail');
+    box.innerHTML = ok ? '&#10003;' : '&#10007;';
+    row.querySelector('.label').textContent = f.label;
+    row.querySelector('.detail').textContent = f.detail;
+  });
 }
 
 function updateOrbCard(card, sym) {
@@ -340,28 +363,9 @@ function updateOrbCard(card, sym) {
   q('.ref-c').textContent = o.ref_close != null ? o.ref_close.toFixed(2) : '--';
   const lf = (o.fires && o.fires.length) ? o.fires[o.fires.length - 1] : null;
   q('.stop-v').textContent = (lf && lf.stop != null) ? lf.stop.toFixed(2) : '--';
-  q('.rvol').textContent = o.latest_rvol != null ? o.latest_rvol.toFixed(2) : '--';
-  q('.pmhi').textContent = o.premarket_high != null ? o.premarket_high.toFixed(2) : '--';
 
-  // --- ORB filter checks ---
-  setCheck(card, 'chk-rvol',
-    o.latest_rvol != null && o.latest_rvol > 1,
-    o.latest_rvol != null ? 'Rvol = ' + o.latest_rvol.toFixed(2) : 'Rvol = -- (no live 2m candle yet)');
-  setCheck(card, 'chk-pmhi',
-    price != null && o.premarket_high != null && price >= o.premarket_high,
-    (price != null && o.premarket_high != null)
-      ? ('price ' + price.toFixed(2) + '  vs  pmhi ' + o.premarket_high.toFixed(2))
-      : 'waiting for data');
-  setCheck(card, 'chk-yhi',
-    price != null && o.yesterday_high != null && price > o.yesterday_high,
-    (price != null && o.yesterday_high != null)
-      ? ('price ' + price.toFixed(2) + '  vs  yhi ' + o.yesterday_high.toFixed(2))
-      : 'waiting for data');
-  setCheck(card, 'chk-ycl',
-    price != null && o.yesterday_close != null && price > o.yesterday_close,
-    (price != null && o.yesterday_close != null)
-      ? ('price ' + price.toFixed(2) + '  vs  yclose ' + o.yesterday_close.toFixed(2))
-      : 'waiting for data');
+  // --- ORB filter checks -- rendered dynamically from server truth ---
+  renderFilterChecks(card, o.filters || []);
 
   // --- Chart ---
   updateChartCandles(card, sym);
@@ -402,15 +406,17 @@ function updateOrbCard(card, sym) {
 // -----------------------------------------------------------------------
 
 function createReversalCard(sym) {
+  // Info grid keeps only the strategy-level facts (tick + reference +
+  // stop). Filter values now live in the check rows below and no longer
+  // need duplicate tiles up top. The .checks container starts empty --
+  // rows are built on the first poll from ``sym.reversal.filters``.
   return baseCard(sym, 'reversal_long', 'rev-tag',
     '<div><div class="k">last 5s tick</div><div class="v last-t">--</div></div>'
     + '<div><div class="k">last 5s price</div><div class="v last-c">--</div></div>'
     + '<div><div class="k">2-bar high</div><div class="v ref-c">--</div></div>'
     + '<div><div class="k">ref 2m candle</div><div class="v ref-t">--</div></div>'
-    + '<div><div class="k">stop level</div><div class="v stop-v">--</div></div>'
-    + '<div><div class="k">recent max Relatr</div><div class="v relatr">--</div></div>',
-    '<div class="check chk-cap"><span class="box fail">&#10007;</span>'
-      + '<span class="label">Relatr &gt;= capitulation threshold</span> <span class="detail">--</span></div>');
+    + '<div><div class="k">stop level</div><div class="v stop-v">--</div></div>',
+    '');
 }
 
 function updateReversalCard(card, sym) {
@@ -423,18 +429,9 @@ function updateReversalCard(card, sym) {
   q('.ref-t').textContent = r.ref_time || '--';
   const lf = (r.fires && r.fires.length) ? r.fires[r.fires.length - 1] : null;
   q('.stop-v').textContent = (lf && lf.stop != null) ? lf.stop.toFixed(2) : '--';
-  q('.relatr').textContent = r.recent_max_relatr != null ? r.recent_max_relatr.toFixed(2) : '--';
 
-  const cap = META.reversal && META.reversal.capitulation_threshold;
-  const win = META.reversal && META.reversal.recent_relatr_window;
-  const maxR = r.recent_max_relatr;
-  const capLabel = (cap != null)
-    ? ('Relatr >= ' + cap.toFixed(2))
-    : 'Relatr >= capitulation threshold';
-  setCheck(card, 'chk-cap',
-    maxR != null && cap != null && maxR >= cap,
-    (maxR != null && cap != null) ? ('max Relatr = ' + maxR.toFixed(2)) : 'waiting for finalized 2m candles',
-    capLabel);
+  // --- reversal filter checks -- rendered dynamically from server truth ---
+  renderFilterChecks(card, r.filters || []);
 
   updateChartCandles(card, sym);
   upsertLine(card, 'refLine',

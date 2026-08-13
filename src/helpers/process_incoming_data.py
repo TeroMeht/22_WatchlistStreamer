@@ -25,8 +25,6 @@ from src.helpers.handle_candles import (
 )
 from src.helpers.utils import get_2min_interval
 from src.strategies import candle_timeline
-from src.strategies.orb_long.visualization import state as viz
-from src.strategies.reversal_long.visualization import state as reversal_viz
 from src.strategies.strategies import run_realtime_strategies, run_strategies
 
 logger = logging.getLogger(__name__)
@@ -115,12 +113,10 @@ async def finalize_candle(last_candle,
         low=db_ready_candle.low,
         close=db_ready_candle.close,
     )
-    # Per-strategy overlays: metric each dashboard needs for its own checks.
-    viz.record_rvol(symbol, db_ready_candle.rvol)            # ORB: Rvol > 3 check
-    viz.record_premarket_high(                                # ORB: price >= premarket high check
-        symbol, db_ready_candle.high, db_ready_candle.time,
-    )  # candle_time gates the update; post-open highs are ignored
-    reversal_viz.record_relatr(symbol, db_ready_candle.relatR)  # reversal: recent-capitulation check
+    # Per-strategy overlays: neither strategy needs per-candle overlay
+    # writes anymore. All filter values on both cards come from
+    # ``filters.evaluate_filters`` on every 5-sec tick and are pushed to
+    # the respective card via ``viz.record_filter_results``.
     # NOTE: the frontend live table now polls /api/livestream/latest on a
     # 10s interval, so we no longer push each finalized candle to FastAPI.
     await run_strategies(last_candle)

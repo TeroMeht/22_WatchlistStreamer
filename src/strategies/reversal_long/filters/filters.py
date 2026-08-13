@@ -11,10 +11,20 @@ The lookback window is intentionally narrow so "still capitulating"
 (very fresh spike) still blocks a bit of the noise, and "capitulated
 then flattening" is the setup we're waiting for.
 
-One wrapper -- ``evaluate_filters`` -- runs every filter, aggregates
-the results, and returns ``(passed, summary)`` to the strategy. The
-strategy logs the outcome and decides whether to short-circuit; this
-module has no side effects beyond DB reads.
+``FilterResult`` mirrors the ORB filter shape so the dashboard's
+dynamic renderer treats reversal rows the same way it treats ORB rows.
+See ``orb_long.filters.filters`` for the full field contract; the short
+version:
+
+    id      -- stable slug (e.g. ``"recent_cap"``)
+    label   -- rendered rule statement, live threshold baked in
+               (e.g. ``"recent capitulation (Relatr >= 3.00 in last 3)"``)
+    passed  -- bool
+    detail  -- right-hand text on the dashboard row, also the log fragment
+
+``evaluate_filters`` returns ``(all_passed, results)``; ``format_summary``
+formats the results list for log lines. This module has no side effects
+beyond DB reads.
 """
 
 from __future__ import annotations
@@ -37,8 +47,10 @@ CAPITULATION_LOOKBACK_CANDLES: int = 3
 
 
 class FilterResult(NamedTuple):
+    id: str
+    label: str
     passed: bool
-    reason: str
+    detail: str
 
 
 # =============================================================================
@@ -57,44 +69,47 @@ async def check_recent_capitulation(
     Relatr column is missing, or when no candle in the window meets the
     threshold.
     """
+    threshold = float(settings.CAPITULATION_THRESHOLD)
+    label = f"recent capitulation (Relatr >= {threshold:.2f} in last {lookback})"
+
     df = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=lookback)
     if df.empty or len(df) < 1:
-        return FilterResult(False, f"no 2m candles in livestream table (need last {lookback})")
+        return FilterResult("recent_cap", label, False, f"no 2m candles yet (need last {lookback})")
     if "Relatr" not in df.columns:
-        return FilterResult(False, "Relatr column missing from livestream table")
+        return FilterResult("recent_cap", label, False, "Relatr column missing from livestream")
 
-    threshold = settings.CAPITULATION_THRESHOLD
     relatrs = df["Relatr"].astype(float)
     max_relatr = float(relatrs.max())
 
-    if max_relatr < threshold:
-        return FilterResult(
-            False,
-            f"no recent capitulation (max Relatr in last {lookback}={max_relatr:.2f} < {threshold:.2f})",
-        )
     return FilterResult(
-        True,
-        f"capitulation seen (max Relatr in last {lookback}={max_relatr:.2f} >= {threshold:.2f})",
+        id="recent_cap",
+        label=label,
+        passed=max_relatr >= threshold,
+        detail=f"max Relatr = {max_relatr:.2f}",
     )
 
 
 # =============================================================================
-# Aggregate wrapper
+# Aggregate wrapper + log formatter
 # =============================================================================
 
 
-def _format(results: List[FilterResult]) -> str:
-    """Compact one-line summary for log lines: PASS reasons or per-fail reasons."""
+def format_summary(results: List[FilterResult]) -> str:
+    """Compact one-line summary for log lines: PASS reasons or per-fail details."""
     failed = [r for r in results if not r.passed]
     if not failed:
-        return "filters PASS (" + "; ".join(r.reason for r in results) + ")"
-    return "filter FAIL: " + "; ".join(r.reason for r in failed)
+        return "filters PASS (" + "; ".join(f"{r.label}: {r.detail}" for r in results) + ")"
+    return "filter FAIL: " + "; ".join(f"{r.label} -> {r.detail}" for r in failed)
 
 
-async def evaluate_filters(symbol: str) -> Tuple[bool, str]:
-
-    results = [
+async def evaluate_filters(symbol: str) -> Tuple[bool, List[FilterResult]]:
+    """
+    Run every filter for ``symbol`` and return ``(all_passed, results)``.
+    ``results`` preserves the order the filters are declared in below --
+    that's the render order on the dashboard.
+    """
+    results: List[FilterResult] = [
         await check_recent_capitulation(symbol),
     ]
-    
-    return all(r.passed for r in results), _format(results)
+
+    return all(r.passed for r in results), results

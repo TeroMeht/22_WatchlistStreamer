@@ -2,11 +2,16 @@
 ORB long -- per-symbol overlay state for the dashboard.
 
 Owns only the pieces that are actually ORB-specific:
-    * ``_latest_rvol`` -- Rvol of the most recent finalized 2-min candle,
-      compared to the Rvol threshold in the dashboard's setup checks.
+    * ``_latest_filters`` -- the last per-filter results from
+      ``filters.evaluate_filters`` for this symbol. The strategy hands
+      them in via ``record_filter_results`` on every 5-sec tick that
+      reaches the filter phase; the dashboard renders each entry as a
+      check row (label + pass/fail + detail) so the client stays
+      agnostic about WHICH filters exist -- add/remove/rethreshold in
+      ``filters.py`` and the UI follows on the next poll.
     * ``snapshot()`` -- decorates the shared overlay/fires/candle-timeline
-      snapshot with ``yesterday_high``, ``yesterday_close``, and
-      ``latest_rvol``.
+      snapshot with ``yesterday_high``, ``yesterday_close``, and the
+      per-symbol ``filters`` list.
 
 Everything else (reference/fire storage, snapshot core, candle timeline)
 lives in ``src.strategies.overlay_state`` and ``src.strategies.candle_timeline``
@@ -15,10 +20,8 @@ so this module and the reversal counterpart don't diverge.
 
 from __future__ import annotations
 
-from datetime import time
-from typing import Optional
+from typing import List
 
-from src.core.config import settings
 from src.strategies import candle_timeline, overlay_state
 # Yesterday's daily OHLC is owned by the strategy state (used by the
 # yesterday-level filters); the dashboard reads it from there so we
@@ -36,45 +39,31 @@ seed_from_history            = candle_timeline.seed_from_history
 
 
 # =============================================================================
-# ORB-specific per-symbol metric
+# ORB-specific per-symbol filter results
 # =============================================================================
 
 
-_latest_rvol: dict[str, Optional[float]] = {}
-# Rolling max of the finalized 2-min candles' highs -- mirrors what the
-# ``check_premarket_high`` filter computes (max High across the livestream
-# table) so the dashboard can display the same value and pass/fail state
-# without re-reading the DB.
-_premarket_high: dict[str, Optional[float]] = {}
+# {SYMBOL: [{"id","label","passed","detail"}, ...]} -- last evaluation only.
+_latest_filters: dict[str, List[dict]] = {}
 
 
-def record_rvol(symbol: str, rvol: Optional[float]) -> None:
-    """Update the latest 2-min candle's Rvol (called from finalize_candle)."""
-    _latest_rvol[symbol.upper()] = None if rvol is None else float(rvol)
-    overlay_state.touch(STRATEGY_KEY, symbol)
-
-
-def record_premarket_high(
-    symbol: str, high: Optional[float], candle_time: Optional[time] = None,
-) -> None:
+def record_filter_results(symbol: str, results) -> None:
     """
-    Fold a candle High into the rolling premarket max. Called from
-    warmup (seeded once from the historical intraday frame, pre-filtered)
-    and finalize_candle (each new finalized 2-min candle).
-
-    ``candle_time`` is the 2-min candle's local time; when it's >=
-    ``settings.SESSION_START`` the update is ignored so the value
-    freezes at the true premarket high. ``None`` means "trust the
-    caller" (used by warmup which has already filtered the frame).
-    Passing ``high=None`` is also a no-op.
+    Store the last per-filter results for ``symbol``. ``results`` is the
+    list of ``FilterResult`` tuples returned by
+    ``filters.evaluate_filters``; we flatten each into a plain dict so
+    the snapshot is JSON-serialisable without pulling the NamedTuple
+    class into the viz layer.
     """
-    if high is None:
-        return
-    if candle_time is not None and candle_time >= settings.SESSION_START:
-        return
-    key = symbol.upper()
-    current = _premarket_high.get(key)
-    _premarket_high[key] = float(high) if current is None else max(current, float(high))
+    _latest_filters[symbol.upper()] = [
+        {
+            "id":     r.id,
+            "label":  r.label,
+            "passed": bool(r.passed),
+            "detail": r.detail,
+        }
+        for r in results
+    ]
     overlay_state.touch(STRATEGY_KEY, symbol)
 
 
@@ -105,21 +94,19 @@ def record_fire(symbol, bar_dt, close, stop_level, ref_close) -> None:
 def snapshot() -> dict:
     """
     ORB dashboard snapshot: shared overlay/fires/candle-timeline shape
-    plus ``yesterday_high``, ``yesterday_close``, and ``latest_rvol``
-    per symbol.
+    plus ``yesterday_high``, ``yesterday_close``, and the per-symbol
+    ``filters`` list.
     """
     return overlay_state.snapshot(
         STRATEGY_KEY,
         extra_symbol_fields=lambda sym: {
             "yesterday_high":  strategy_state.yesterday_high(sym),
             "yesterday_close": strategy_state.yesterday_close(sym),
-            "latest_rvol":     _latest_rvol.get(sym.upper()),
-            "premarket_high":  _premarket_high.get(sym.upper()),
+            "filters":         _latest_filters.get(sym.upper(), []),
         },
     )
 
 
 def reset() -> None:
     overlay_state.reset(STRATEGY_KEY)
-    _latest_rvol.clear()
-    _premarket_high.clear()
+    _latest_filters.clear()

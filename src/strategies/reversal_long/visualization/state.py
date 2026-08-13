@@ -2,13 +2,15 @@
 reversal_long -- per-symbol overlay state for the dashboard.
 
 Owns only the pieces that are actually reversal-specific:
-    * ``_recent_relatrs`` / ``_recent_max_relatr`` -- rolling max Relatr
-      across the last ``RECENT_RELATR_WINDOW`` finalized 2-min candles,
-      used by the dashboard's "recent capitulation" setup check.
+    * ``_latest_filters`` -- the last per-filter results from
+      ``filters.evaluate_filters`` for this symbol. The strategy hands
+      them in via ``record_filter_results`` on every 5-sec tick that
+      reaches the filter phase; the dashboard renders each entry as a
+      check row (label + pass/fail + detail) so the client stays
+      agnostic about WHICH filters exist -- add/remove/rethreshold in
+      ``filters.py`` and the UI follows on the next poll.
     * ``snapshot()`` -- decorates the shared overlay/fires/candle-timeline
-      snapshot with ``recent_max_relatr`` per symbol and exposes
-      ``capitulation_threshold`` / ``recent_relatr_window`` at the top
-      level so the dashboard doesn't need to hardcode them.
+      snapshot with the per-symbol ``filters`` list.
 
 Everything else (reference/fire storage, snapshot core, candle timeline)
 lives in ``src.strategies.overlay_state`` and ``src.strategies.candle_timeline``
@@ -17,18 +19,12 @@ so this module and the ORB counterpart don't diverge.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
-from src.core.config import settings
 from src.strategies import candle_timeline, overlay_state
 
 
 STRATEGY_KEY: str = "reversal"
-
-# How many recent 2-min Relatr values feed ``recent_max_relatr``. Must
-# match ``filters.filters.CAPITULATION_LOOKBACK_CANDLES`` so the
-# dashboard shows the same window the strategy actually gates on.
-RECENT_RELATR_WINDOW: int = 3
 
 
 # ---- Re-exports from the shared candle timeline -----------------------------
@@ -38,28 +34,31 @@ seed_from_history            = candle_timeline.seed_from_history
 
 
 # =============================================================================
-# reversal-specific per-symbol metric
+# reversal-specific per-symbol filter results
 # =============================================================================
 
 
-_recent_relatrs:     dict[str, List[float]]     = {}
-_recent_max_relatr:  dict[str, Optional[float]] = {}
+# {SYMBOL: [{"id","label","passed","detail"}, ...]} -- last evaluation only.
+_latest_filters: dict[str, List[dict]] = {}
 
 
-def record_relatr(symbol: str, relatr: Optional[float]) -> None:
+def record_filter_results(symbol: str, results) -> None:
     """
-    Push the latest 2-min Relatr. Maintains a rolling buffer of the last
-    ``RECENT_RELATR_WINDOW`` values so ``recent_max_relatr`` reflects the
-    same lookback the strategy filter gates on.
+    Store the last per-filter results for ``symbol``. ``results`` is the
+    list of ``FilterResult`` tuples returned by
+    ``filters.evaluate_filters``; we flatten each into a plain dict so
+    the snapshot is JSON-serialisable without pulling the NamedTuple
+    class into the viz layer.
     """
-    if relatr is None:
-        return
-    key = symbol.upper()
-    buf = _recent_relatrs.setdefault(key, [])
-    buf.append(float(relatr))
-    if len(buf) > RECENT_RELATR_WINDOW:
-        del buf[:-RECENT_RELATR_WINDOW]
-    _recent_max_relatr[key] = max(buf)
+    _latest_filters[symbol.upper()] = [
+        {
+            "id":     r.id,
+            "label":  r.label,
+            "passed": bool(r.passed),
+            "detail": r.detail,
+        }
+        for r in results
+    ]
     overlay_state.touch(STRATEGY_KEY, symbol)
 
 
@@ -90,22 +89,16 @@ def record_fire(symbol, bar_dt, close, stop_level, ref_close) -> None:
 def snapshot() -> dict:
     """
     Reversal dashboard snapshot: shared overlay/fires/candle-timeline
-    shape plus ``recent_max_relatr`` per symbol, and the top-level
-    ``capitulation_threshold`` / ``recent_relatr_window`` the dashboard
-    reads for its capitulation-check label.
+    shape plus the per-symbol ``filters`` list.
     """
-    result = overlay_state.snapshot(
+    return overlay_state.snapshot(
         STRATEGY_KEY,
         extra_symbol_fields=lambda sym: {
-            "recent_max_relatr": _recent_max_relatr.get(sym.upper()),
+            "filters": _latest_filters.get(sym.upper(), []),
         },
     )
-    result["capitulation_threshold"] = float(settings.CAPITULATION_THRESHOLD)
-    result["recent_relatr_window"] = RECENT_RELATR_WINDOW
-    return result
 
 
 def reset() -> None:
     overlay_state.reset(STRATEGY_KEY)
-    _recent_relatrs.clear()
-    _recent_max_relatr.clear()
+    _latest_filters.clear()

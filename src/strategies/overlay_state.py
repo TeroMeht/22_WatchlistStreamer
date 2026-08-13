@@ -131,8 +131,8 @@ def record_fire(
 def touch(strategy_key: str, symbol: str) -> None:
     """
     Bump ``updated_at`` for the overlay row. Called by strategy-specific
-    writers (``record_rvol``, ``record_relatr``, ...) whose metric lives
-    outside this module but should still refresh the dashboard timestamp.
+    writers (e.g. ``record_filter_results``) whose data lives outside
+    this module but should still refresh the dashboard timestamp.
     """
     _touch(strategy_key, symbol)
 

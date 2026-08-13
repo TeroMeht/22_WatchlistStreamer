@@ -16,6 +16,11 @@ Fire semantics:
       pipeline -- viz hook + alarm + entry order + viz fire hook + latch.
     * One-shot per session per symbol -- once fired, latched until the
       streamer is restarted.
+
+Phase order is deliberate: filter evaluation runs BEFORE the reference
+availability check so the dashboard populates its filter rows from the
+very first 5-sec tick after warmup -- users don't want to stare at
+"waiting for first tick" until two finalized 2-min candles exist.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ from src.strategies.actions import fire_signal
 from src.strategies.breakout_level import get_reference_from_last_two_candles
 from src.strategies.detection import detect_breakout
 from src.strategies.hooks import make_hooks
-from .filters.filters import evaluate_filters
+from .filters.filters import evaluate_filters, format_summary
 from .state import has_fired, mark_fired
 from .visualization import state as viz
 
@@ -77,22 +82,27 @@ async def reversal_long_strategy(bar: RealTimeBar, symbol: str) -> None:
         )
         return
 
-    # --- Phase 1: reference selection ---------------------------------------
+    # --- Phase 1: setup filters --------------------------------------------
+    # Run and publish BEFORE the reference check so the dashboard card
+    # populates from tick #1, not from tick #1 that arrives after two
+    # 2-min candles have finalized.
+    filters_passed, filter_results = await evaluate_filters(symbol)
+    viz.record_filter_results(symbol, filter_results)
+    filters_summary = format_summary(filter_results)
+
+    # --- Phase 2: reference selection ---------------------------------------
     breakout_level = get_reference_from_last_two_candles(symbol)
     if breakout_level is None:
         logger.debug(
             "reversal_long: %s -- reference not available yet "
-            "(LIVE 5s bar %s close=%.2f)",
-            symbol, bar_time_local.time(), float(bar.close),
+            "(LIVE 5s bar %s close=%.2f) | %s",
+            symbol, bar_time_local.time(), float(bar.close), filters_summary,
         )
         return
 
     hooks.on_reference(symbol, breakout_level)
 
-    # --- Phase 2: setup filters --------------------------------------------
-
-    filters_passed, filters_summary = await evaluate_filters(symbol)
-
+    # --- Phase 3: filter gate ----------------------------------------------
     if not filters_passed:
         logger.info(
             "reversal_long: %s -- Incoming livestream %s price=%.2f | Breakout level %s "
@@ -104,7 +114,7 @@ async def reversal_long_strategy(bar: RealTimeBar, symbol: str) -> None:
         )
         return
 
-    # --- Phase 3: breakout detection ---------------------------------------
+    # --- Phase 4: breakout detection ---------------------------------------
     event = detect_breakout(float(bar.close), breakout_level.ref_close)
     
     logger.info(
@@ -119,12 +129,12 @@ async def reversal_long_strategy(bar: RealTimeBar, symbol: str) -> None:
     if not event.is_breakout:
         return
 
-    # --- Phase 4: detect stop level ---------------------------------------------
+    # --- Phase 5: detect stop level ---------------------------------------------
     df_last = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=STOP_LOOKBACK_CANDLES)
     stop_level = detect_stoplevel(df_last, direction="long")
 
 
-    # --- Phase 5: fire alarm and generate order ---------------------------------------------
+    # --- Phase 6: fire alarm and generate order ---------------------------------------------
     await fire_signal(
         bar, symbol, breakout_level, bar_time_local, stop_level,
         signal_name=REVERSAL_LONG_SIGNAL_NAME,
