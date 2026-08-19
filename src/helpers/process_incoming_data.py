@@ -48,14 +48,11 @@ if not _bars_logger.handlers:
 
 
 
-
-
-
 async def handle_incoming_candle(candle: CandleRow, atr_value:float) -> CandleRow:
     try:
         df_from_db, avg_volume = await asyncio.gather(
             get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=None),
-                          
+
             fetch_avg_volume_for_candle(candle)
         )
         candle.avg_volume = avg_volume
@@ -97,13 +94,15 @@ async def finalize_candle(last_candle,
                         )
     # calculations
     last_candle = await handle_incoming_candle(last_candle, atr_value)
-    
+
     db_ready_candle = enforce_candle_row_types(last_candle)  # Ensure all floats
     logger.info(f"Finalized candle for {symbol} at {last_candle.time}: O={last_candle.open}, H={last_candle.high}, L={last_candle.low}, C={last_candle.close}, V={last_candle.volume}, VWAP={last_candle.vwap}, EMA9={last_candle.ema9}, RelatR={last_candle.relatR}, AvgVol={last_candle.avg_volume}, RVol={last_candle.rvol}")
     await insert_candlestick_row(db_ready_candle)
- 
+
     # Push the finalized 2-min candle to the SHARED candle timeline once;
-    # both per-strategy viz modules delegate to it internally.
+    # both per-strategy viz modules delegate to it internally. VWAP and
+    # EMA9 ride along on the record so the dashboard can plot them as
+    # overlay line series without needing a second store.
     candle_dt = datetime.combine(db_ready_candle.date, db_ready_candle.time)
     candle_timeline.record_finalized_2min_candle(
         symbol=symbol,
@@ -112,6 +111,8 @@ async def finalize_candle(last_candle,
         high=db_ready_candle.high,
         low=db_ready_candle.low,
         close=db_ready_candle.close,
+        vwap=db_ready_candle.vwap,
+        ema9=db_ready_candle.ema9,
     )
     # Per-strategy overlays: neither strategy needs per-candle overlay
     # writes anymore. All filter values on both cards come from

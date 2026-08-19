@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 
-
 # =============================================================================
 # Strategy implementations
 # =============================================================================
@@ -107,38 +106,3 @@ async def vwapcontinuation_short_strategy(candle: CandleRow):
                                                 signal_name="VWAP continuation short setup")
     else:
         logger.info("VWAP Continuation short strategy skipped for symbol: %s | RelATR: %.4f < %.4f", candle.symbol, candle.relatR, settings.RVOL_THRESHOLD)
-
-
-async def vwapcontinuation_long_strategy(candle: CandleRow):
-
-    logger.info("Running VWAP Continuation long strategy for symbol: %s", candle.symbol)
-    if candle.rvol >= settings.RVOL_THRESHOLD:
-
-    # Jos sisääntullut kynttilä on lähellä VWAPia, tarkastetaan onko viimeaikoina ollut euforiaa
-        if is_vwap_close(candle, settings.VWAP_DISTANCE):
-
-        # Hakee rivit session alusta asti, jotta tiedetään tapahtuiko euforia jossain kohtaa
-            df_all = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=None)
-
-
-            # Tarvii tarkastaa että onhan hinta ollut viimeaikoina VWAP yläpuolella
-            last_5 = df_all.tail(5)
-            avg_relatr = last_5["Relatr"].mean()  # lasketaan viimeisimpien 5 candlejen relatr keskiarvo. Tämän etumerkin perusteella päätellään missä hinta on ollut
-
-
-            # Tarkoituksena käyttää samaa kannasta haettua dataa jottei sitä tarvi kysellä uudelleen
-            if avg_relatr < 0:  # jos tää on ollut pienempi kuin 0 niin on oltu VWAP yläpuolella
-                # Log the average Relatr for debugging/visibility
-                logger.info(
-                    "Price has been above VWAP recently for symbol: %s | avg Relatr of last 5 candles: %.4f",
-                    candle.symbol,
-                    avg_relatr,
-                )
-                # Detect euforia
-                if detect_euforia(df_all, threshold=settings.EUFORIC_THRESHOLD):
-                    logger.info(f"Euforia detected earlier for symbol: {candle.symbol} now near VWAP, triggering VWAP setup alarm...")
-
-                    await generate_signal_alarm(candle=candle,
-                                                signal_name="VWAP continuation long setup")
-    else:
-        logger.info("VWAP Continuation long strategy skipped for symbol: %s | RelATR: %.4f < %.4f", candle.symbol, candle.relatR, settings.RVOL_THRESHOLD)

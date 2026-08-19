@@ -157,7 +157,7 @@ async def evaluate_filters(symbol: str, current_price: float) -> Tuple[bool, Lis
     df_last = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=None)
 
     results: List[FilterResult] = [
-        #await check_premarket_high(df_last, current_price),
+        await check_premarket_high(df_last, current_price),
         await check_rvol_gte(df_last, settings.RVOL_THRESHOLD),
         await check_price_above_yesterday_high(symbol, current_price),
         await check_price_above_yesterday_close(symbol, current_price),

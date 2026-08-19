@@ -18,6 +18,18 @@ and the viz layer read from here. The dependency arrow points
 strategy_logic -> candle_timeline and viz -> candle_timeline; viz never
 sits between the two.
 
+Per-candle fields carried on the timeline:
+
+    ts, t             -- unix + iso timestamp of the 2-min interval start
+    o, h, l, c        -- OHLC
+    vwap              -- session VWAP as of this candle's close (nullable)
+    ema9              -- 9-period EMA of Close as of this candle (nullable)
+
+VWAP / EMA9 are computed at finalize time in ``handle_incoming_candle``
+and land here through ``record_finalized_2min_candle``. The in-progress
+candle (built from 5-sec ticks) carries no vwap/ema9 -- the dashboard's
+line series just end at the last finalized candle.
+
 Readers exposed:
 
     get_last_finalized_candles(symbol, n)
@@ -103,6 +115,24 @@ def _get(symbol: str) -> CandleTimeline:
     return tl
 
 
+def _clean_float(v) -> Optional[float]:
+    """
+    Coerce a numeric-ish value to float, returning ``None`` for ``None``,
+    ``NaN``, or anything that can't be cast. Used for the nullable
+    indicator fields (vwap / ema9) where a missing value is legitimate
+    on the very first candles of the session.
+    """
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if f != f:  # NaN
+        return None
+    return f
+
+
 # =============================================================================
 # Writers
 # =============================================================================
@@ -130,6 +160,9 @@ def record_5s_tick(
             "ts": interval_ts,
             "t": interval_iso,
             "o": o, "h": h, "l": l, "c": c,
+            # 5-sec bars carry no vwap / ema9 -- the dashboard just ends
+            # its VWAP / EMA9 line series at the last finalized candle.
+            "vwap": None, "ema9": None,
         }
     else:
         cur["h"] = max(cur["h"], h)
@@ -147,14 +180,25 @@ def record_finalized_2min_candle(
     high: float,
     low: float,
     close: float,
+    vwap: Optional[float] = None,
+    ema9: Optional[float] = None,
 ) -> None:
-    """Append a completed 2-min OHLC candle. Idempotent for the tail row."""
+    """
+    Append a completed 2-min OHLC candle. Idempotent for the tail row.
+
+    ``vwap`` / ``ema9`` are the finalize-time indicator values (see
+    ``handle_incoming_candle``). They ride along on the candle dict so
+    the dashboard can plot them as overlay line series without needing
+    a second store.
+    """
     tl = _get(symbol)
     ts = to_unix_local_as_utc(candle_dt)
     iso = candle_dt.replace(tzinfo=None).isoformat(timespec="seconds")
     candle = {
         "ts": ts, "t": iso,
         "o": float(open_), "h": float(high), "l": float(low), "c": float(close),
+        "vwap": _clean_float(vwap),
+        "ema9": _clean_float(ema9),
     }
 
     if tl.current_candle is not None and tl.current_candle["ts"] == ts:
@@ -169,6 +213,17 @@ def record_finalized_2min_candle(
         if len(tl.candles_2min) > MAX_CANDLES_PER_SYMBOL:
             tl.candles_2min = tl.candles_2min[-MAX_CANDLES_PER_SYMBOL:]
 
+    # Populate last-bar fields from the finalized candle too so
+    # dashboards for candle-driven strategies (vwap_continuation_long)
+    # have something to display even when no realtime strategy is
+    # arming ``record_5s_tick`` on this symbol. Only advance in the
+    # forward direction so a live 5-sec tick that arrived first for
+    # a later interval doesn't get overwritten by a finalize catching
+    # up to a stale row.
+    if tl.last_bar_time is None or iso >= tl.last_bar_time:
+        tl.last_bar_time = iso
+        tl.last_bar_close = float(close)
+
 
 def seed_from_history(symbol: str, rows: list) -> None:
     """Bulk-seed the timeline with historical 2-min OHLC candles."""
@@ -180,9 +235,27 @@ def seed_from_history(symbol: str, rows: list) -> None:
                     return v
             return getattr(row, name, None) or row[name]
 
+        def _get_optional(name):
+            """Same as _get_field but returns None on missing/exception."""
+            try:
+                if hasattr(row, "get") and callable(getattr(row, "get")):
+                    return row.get(name)
+                return getattr(row, name, None)
+            except Exception:
+                return None
+
         d = _get_field("Date")
         t = _get_field("Time")
         candle_dt = datetime.combine(d, t)
+        # Historical rows come from the livestream table (all-caps VWAP /
+        # EMA9 columns). Older/alternate frames may use title-cased
+        # ``Vwap`` / ``Ema9`` -- try both so seeding is robust to either.
+        vwap = _get_optional("VWAP")
+        if vwap is None:
+            vwap = _get_optional("Vwap")
+        ema9 = _get_optional("EMA9")
+        if ema9 is None:
+            ema9 = _get_optional("Ema9")
         record_finalized_2min_candle(
             symbol=symbol,
             candle_dt=candle_dt,
@@ -190,6 +263,8 @@ def seed_from_history(symbol: str, rows: list) -> None:
             high=float(_get_field("High")),
             low=float(_get_field("Low")),
             close=float(_get_field("Close")),
+            vwap=vwap,
+            ema9=ema9,
         )
 
 

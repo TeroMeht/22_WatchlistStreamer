@@ -23,8 +23,8 @@ from pathlib import Path
 from ib_async import IB, Stock
 
 # ============ CONFIG ============
-SYMBOL      = "NBIS"
-DATE        = "2026-08-12"          # YYYY-MM-DD (local calendar date)
+SYMBOL      = "AMLX"
+DATE        = "2026-08-18"          # YYYY-MM-DD (local calendar date)
 EXCHANGE    = "SMART"
 CURRENCY    = "USD"
 
