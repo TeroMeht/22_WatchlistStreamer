@@ -54,11 +54,14 @@ def set_watchlist_strategies(mapping: Dict[str, Set[str]]) -> None:
         (sym or "").upper(): set(strats or ())
         for sym, strats in mapping.items()
     }
-    logger.info(
-        "Watchlist strategy cache loaded: %d symbols, %d total bindings",
-        len(_watchlist_strategies),
-        sum(len(v) for v in _watchlist_strategies.values()),
+    # Emit a single per-symbol summary so the log makes it obvious what
+    # will actually be monitored (symbol -> sorted strategy list). Sorted
+    # keys/values keep the line stable across runs for diffing.
+    summary = ", ".join(
+        f"{sym}: [{', '.join(sorted(strats)) or '-'}]"
+        for sym, strats in sorted(_watchlist_strategies.items())
     )
+    logger.info("Watchlist -> %s", summary or "(empty)")
 
 
 def get_watchlist_strategies() -> Dict[str, Set[str]]:

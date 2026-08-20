@@ -110,9 +110,7 @@ async def load_watchlist() -> Dict[str, Set[str]]:
         if strat:
             bucket.add(strat)
 
-    logger.info(
-        "Loaded watchlist from DB: %d symbols, %d strategy bindings",
-        len(result),
-        sum(len(v) for v in result.values()),
-    )
+    # Summary log is emitted downstream by set_watchlist_strategies() so
+    # we get a single "SYMBOL -> [strategies]" line after the watchlist
+    # has been merged with armed exits, instead of two overlapping counts.
     return result
