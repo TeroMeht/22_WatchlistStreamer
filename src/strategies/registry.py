@@ -29,8 +29,8 @@ from src.strategies.vwap_continuation_long.strategy import vwap_continuation_lon
 # Candle-driven (2-min) entries. Callable: fn(candle) -> coroutine.
 ENTRY_STRATEGIES: dict = {
     "reversal_long":            reversal_strategy,
-    "reversal_short":           reversal_short_strategy,
-    "vwap_continuation_short":  vwapcontinuation_short_strategy,
+    #"reversal_short":           reversal_short_strategy,
+    #"vwap_continuation_short":  vwapcontinuation_short_strategy,
     "vwap_continuation_long":   vwap_continuation_long_strategy,
 }
 
@@ -46,6 +46,6 @@ EXIT_STRATEGIES: dict = {
 
 # Realtime (5-sec) entries. Callable: fn(bar, symbol) -> coroutine.
 REALTIME_ENTRY_STRATEGIES: dict = {
-    "orb_breakout_long":        orb_breakout_long,
-    "reversal_long_breakout":   reversal_long_strategy,
+   # "orb_breakout_long":        orb_breakout_long,
+   # "reversal_long_breakout":   reversal_long_strategy,
 }

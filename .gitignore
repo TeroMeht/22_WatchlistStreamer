@@ -20,3 +20,4 @@ tickers/
 
 # 5-sec bar log
 bars_5s.log
+*.csv
