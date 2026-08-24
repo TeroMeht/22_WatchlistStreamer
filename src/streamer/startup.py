@@ -1,23 +1,28 @@
 """
 Streamer startup phases.
 
-Three orchestrator steps ``main`` calls in order before it kicks off the
-data pipeline:
+Three orchestrator steps ``main`` calls in order before it kicks off
+the data pipeline:
 
     1. ``initialize_app``    -- process-level bring-up (DB pool,
-                                 IBSource wiring, PID ping, dashboard).
+                                 IBSource wiring, warmup / live source
+                                 factory calls, PID ping, dashboard).
     2. ``prepare_database``  -- all DB table setup in one place
-                                 (alarms/orders/watchlist plus livestream
-                                 rotation).
-    3. ``prepare_watchlist`` -- assemble the monitor set from watchlist +
-                                 armed exits and push it to the strategy
-                                 dispatcher.
+                                 (alarms/orders/watchlist plus
+                                 livestream rotation).
+    3. ``prepare_watchlist`` -- assemble the monitor set from watchlist
+                                 + armed exits and push it to the
+                                 strategy dispatcher.
 
-The IB connection itself is now owned by the shared ``data_sources.ib``
-package -- this module just builds an ``IBSource`` from settings and
-lets the package handle lazy connect + reconnect. The concrete
-``connectAsync`` happens on first use inside the fetchers (via
-``ensure_connected``), not here.
+The IB socket is opened here explicitly (``await connect(source)``)
+right after the source is built, BEFORE any adapter uses it. The
+adapters no longer lazy-connect -- they assume the socket is up. On
+shutdown, ``main.py``'s ``finally`` calls ``disconnect(source)``.
+
+Source selection happens HERE, not in ``data_pipe``. Both the warmup
+and live source implementations are picked by their factories
+(``make_warmup_source`` / ``make_live_source``) and returned from
+``initialize_app`` as abstractions the pipeline just holds.
 """
 
 from __future__ import annotations
@@ -26,7 +31,11 @@ import logging
 import os
 from typing import Optional
 
-from data_sources.ib._client import IBSource, from_config as ib_source_from_config
+from data_sources.ib._client import (
+    IBSource,
+    connect as ib_connect,
+    from_config as ib_source_from_config,
+)
 
 from src.alarms.send_postrequest import send_streamer_status
 from src.core.config import settings
@@ -38,10 +47,12 @@ from src.database.db_functions import (
     create_exit_requests_table,
 )
 from src.database.exit_requests import load_armed_exit_strategies
-from src.database.watchlist import create_watchlist_tables, load_watchlist
-from src.dependencies import init_db_pool
-from src.strategies.dispatcher_state import set_watchlist_strategies
-from src.strategies.visualization.dashboard import start_dashboard
+from src.database.watchlist    import create_watchlist_tables, load_watchlist
+from src.dependencies          import init_db_pool
+from src.strategies.dispatcher_state           import set_watchlist_strategies
+from src.strategies.visualization.dashboard    import start_dashboard
+from src.streamer.live_source     import LiveSource, make_live_source
+from src.streamer.warmup_source   import WarmupSource, make_warmup_source
 
 
 # =============================================================================
@@ -49,21 +60,9 @@ from src.strategies.visualization.dashboard import start_dashboard
 # =============================================================================
 
 
-async def initialize_app() -> Optional[IBSource]:
-    """
-    Process-level bring-up. Returns an ``IBSource`` ready for use, OR
-    ``None`` when this run doesn't need IB at all (``MODE=replay`` and
-    ``HISTORY_SOURCE=polygon``).
+async def initialize_app() -> tuple[Optional[IBSource], WarmupSource, LiveSource]:
 
-    Skipping IBSource construction avoids ``ib_async`` even trying to
-    stand up a client in cases where the streamer never touches IB --
-    the whole point of the polygon warmup source (early-morning
-    replays before a gateway is up).
-
-    ``main.py``'s shutdown ``finally`` guards on ``source is not None``
-    before calling ``disconnect``.
-    """
-    await init_db_pool()  # Initialize the global DB pool so all downstream DB calls can use it.
+    await init_db_pool()  # Global DB pool so all downstream DB calls can use it.
 
     skip_ib = settings.MODE == "replay" and settings.HISTORY_SOURCE == "polygon"
 
@@ -74,14 +73,13 @@ async def initialize_app() -> Optional[IBSource]:
             "warmup will use Polygon, bars will come from replay CSVs."
         )
     else:
-        # Build the IBSource wrapper. The underlying ``IB()`` is NOT
-        # connected yet -- ``ensure_connected(source)`` opens the socket
-        # on first use inside the fetchers, guarded by an internal lock.
+
         source = ib_source_from_config(settings)
-        logging.info(
-            "IBSource ready (lazy connect): %s:%d clientId=%s",
-            source.host, source.port, source.client_id,
-        )
+        await ib_connect(source)
+
+
+    warmup = make_warmup_source(source)
+    live   = make_live_source(source)
 
     # Notify the backend we're up (PID lets it watch for hard kills).
     await send_streamer_status(
@@ -93,7 +91,7 @@ async def initialize_app() -> Optional[IBSource]:
     # Bring up the unified strategy dashboard (localhost:8790).
     await start_dashboard()
 
-    return source
+    return source, warmup, live
 
 
 # =============================================================================

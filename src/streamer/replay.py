@@ -22,11 +22,12 @@ its symbol, drop the file if the symbol isn't in ``valid_tickers``
 (watchlist filter), then replay it.
 
 Contract with ``process_bar``: ``process_bar`` does
-``bar.time.replace(tzinfo=UTC).astimezone(settings.TIMEZONE)``. So
-whatever we put in ``bar.time`` must be a **naive UTC** datetime -- the
-same shape ``ib_async.RealTimeBar.time`` has in live mode. The
-Helsinki-local timestamp from the CSV is therefore localized -> UTC ->
-stripped of tzinfo before being handed to ``process_bar``.
+``bar.date.replace(tzinfo=UTC).astimezone(settings.TIMEZONE)``. So
+whatever we put in ``bar.date`` must be a **naive UTC** datetime --
+same shape the IB path yields inside ``IncomingBar`` after conversion
+from ``ib_async.RealTimeBar.time``. The Helsinki-local timestamp from
+the CSV is therefore localized -> UTC -> stripped of tzinfo before
+being handed to ``process_bar``.
 
 Timing: rows for a single symbol are dispatched sequentially with
 ``asyncio.sleep((t2 - t1) / REPLAY_SPEED)`` between them; multiple
@@ -42,8 +43,9 @@ import csv
 import logging
 from datetime import date, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from zoneinfo import ZoneInfo
+
+from data_sources._bar import IncomingBar
 
 from src.core.config import settings
 from src.helpers.process_incoming_data import process_bar
@@ -163,11 +165,20 @@ def _parse_ts(raw: str) -> datetime | None:
     return None
 
 
-def _row_to_bar(row: dict, tz: ZoneInfo) -> tuple[str, SimpleNamespace] | None:
+def _row_to_bar(row: dict, tz: ZoneInfo) -> tuple[str, IncomingBar] | None:
     """
     Convert one CSV row (``dict`` from ``DictReader``) into a
     ``(symbol, bar)`` pair. Returns ``None`` for rows we can't parse --
     logged at warning level so bad data is visible without killing the run.
+
+    Emits a canonical ``IncomingBar`` -- same shape the IB path
+    produces inside ``IBRealtimeSource``. CSV field mapping:
+    ``time``   -> ``IncomingBar.date`` (naive UTC datetime),
+    ``open``   -> ``.open``,   ``high`` -> ``.high``,
+    ``low``    -> ``.low``,    ``close`` -> ``.close``,
+    ``volume`` -> ``.volume``,
+    ``wap``    -> ``.average`` (IB's WAP == IncomingBar.average),
+    ``count``  -> ``.barCount``.
     """
     parsed_ts = _parse_ts(row.get("time", ""))
     if parsed_ts is None:
@@ -179,8 +190,9 @@ def _row_to_bar(row: dict, tz: ZoneInfo) -> tuple[str, SimpleNamespace] | None:
         logger.warning("Skipping row with empty symbol: %r", row)
         return None
 
-    # Normalize to naive UTC so bar.time matches the shape ib_async gives
-    # us in live mode (process_bar does bar.time.replace(tzinfo=UTC)).
+    # Normalize to naive UTC so bar.date matches the shape the IB path
+    # yields (RealTimeBar.time is naive UTC; IncomingBar.from_realtime
+    # carries that through). process_bar does bar.date.replace(tzinfo=UTC).
     # If the CSV timestamp already carries a tz offset (e.g. +03:00) we
     # trust it; otherwise assume it's in settings.TIMEZONE (Helsinki).
     if parsed_ts.tzinfo is None:
@@ -188,15 +200,15 @@ def _row_to_bar(row: dict, tz: ZoneInfo) -> tuple[str, SimpleNamespace] | None:
     ts_utc_naive = parsed_ts.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
 
     try:
-        bar = SimpleNamespace(
-            time=ts_utc_naive,
-            open_=float(row["open"]),
-            high=float(row["high"]),
-            low=float(row["low"]),
-            close=float(row["close"]),
-            volume=float(row["volume"]),
-            wap=float(row["wap"]),
-            count=int(float(row.get("count") or 0)),
+        bar = IncomingBar(
+            date     = ts_utc_naive,
+            open     = float(row["open"]),
+            high     = float(row["high"]),
+            low      = float(row["low"]),
+            close    = float(row["close"]),
+            volume   = float(row["volume"]),
+            average  = float(row["wap"]),
+            barCount = int(float(row.get("count") or 0)),
         )
     except (KeyError, ValueError) as e:
         logger.warning("Skipping malformed row %r: %s", row, e)
@@ -205,7 +217,7 @@ def _row_to_bar(row: dict, tz: ZoneInfo) -> tuple[str, SimpleNamespace] | None:
     return symbol, bar
 
 
-def _load_csv(path: Path, tz: ZoneInfo) -> tuple[str | None, list[SimpleNamespace]]:
+def _load_csv(path: Path, tz: ZoneInfo) -> tuple[str | None, list[IncomingBar]]:
     """
     Read one CSV into ``(symbol, bars)``.
 
@@ -220,7 +232,7 @@ def _load_csv(path: Path, tz: ZoneInfo) -> tuple[str | None, list[SimpleNamespac
     ``get_replay_start_datetime`` so both dispatch AND warmup start at
     the same instant.
     """
-    bars: list[SimpleNamespace] = []
+    bars: list[IncomingBar] = []
     file_symbol: str | None = None
     cutoff = settings.REPLAY_START_TIME  # datetime.time or None
     skipped_before_cutoff = 0
@@ -241,13 +253,13 @@ def _load_csv(path: Path, tz: ZoneInfo) -> tuple[str | None, list[SimpleNamespac
                 )
                 continue
 
-            # Wall-clock cutoff. ``bar.time`` is naive UTC (matches
-            # ib_async.RealTimeBar.time -- see the module docstring),
-            # so convert back to the display tz to compare against a
-            # local time-of-day like 16:30.
+            # Wall-clock cutoff. ``bar.date`` is naive UTC (matches
+            # the IB path's IncomingBar shape -- see the module
+            # docstring), so convert back to the display tz to compare
+            # against a local time-of-day like 16:30.
             if cutoff is not None:
                 local_t = (
-                    bar.time.replace(tzinfo=ZoneInfo("UTC"))
+                    bar.date.replace(tzinfo=ZoneInfo("UTC"))
                     .astimezone(tz)
                     .time()
                 )
@@ -266,7 +278,7 @@ def _load_csv(path: Path, tz: ZoneInfo) -> tuple[str | None, list[SimpleNamespac
     return file_symbol, bars
 
 
-def _discover_replays(valid_tickers: set[str]) -> dict[str, list[SimpleNamespace]]:
+def _discover_replays(valid_tickers: set[str]) -> dict[str, list[IncomingBar]]:
     """
     Scan ``REPLAY_DATA_DIR`` for ``*.csv`` files and return
     ``{symbol: bars}`` for every file whose symbol is in ``valid_tickers``.
@@ -280,7 +292,7 @@ def _discover_replays(valid_tickers: set[str]) -> dict[str, list[SimpleNamespace
         )
 
     tz = ZoneInfo(settings.TIMEZONE)
-    replays: dict[str, list[SimpleNamespace]] = {}
+    replays: dict[str, list[IncomingBar]] = {}
 
     csv_files = sorted(data_dir.glob("*.csv"))
     if not csv_files:
@@ -312,7 +324,7 @@ def _discover_replays(valid_tickers: set[str]) -> dict[str, list[SimpleNamespace
 
 
 async def _replay_symbol(
-    candle_store, atr, symbol: str, bars: list[SimpleNamespace],
+    candle_store, atr, symbol: str, bars: list[IncomingBar],
 ) -> None:
     """
     Drive one symbol's replay: for each bar, await ``process_bar`` (same
@@ -330,16 +342,16 @@ async def _replay_symbol(
 
     for bar in bars:
         if prev_ts is not None and speed > 0:
-            gap = (bar.time - prev_ts).total_seconds() / speed
+            gap = (bar.date - prev_ts).total_seconds() / speed
             if gap > 0:
                 await asyncio.sleep(gap)
-        prev_ts = bar.time
+        prev_ts = bar.date
 
         try:
             await process_bar(candle_store, atr, symbol, bar)
         except Exception:
             logger.exception(
-                "[replay] process_bar failed for %s at %s", symbol, bar.time,
+                "[replay] process_bar failed for %s at %s", symbol, bar.date,
             )
 
     logger.info("[replay] finished %s (%d bars)", symbol, len(bars))

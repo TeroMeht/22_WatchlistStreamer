@@ -4,7 +4,7 @@ import logging as _logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from ib_async import RealTimeBar
+from data_sources._bar import IncomingBar
 
 from src.common.calculate import (
     calculate_next_ema9,
@@ -114,13 +114,19 @@ async def finalize_candle(last_candle,
 async def process_bar(store: CandleStore,
                       atr_value: float,
                       symbol: str,
-                      bar: RealTimeBar):
+                      bar: IncomingBar):
     """
     Process incoming 5-sec bar into aggregated 2-min candlesticks.
+
+    ``bar`` is a canonical ``IncomingBar``. Both the IB live path
+    (converted from ``ib_async.RealTimeBar`` inside
+    ``IBRealtimeSource``) and the CSV replay path produce it. For
+    realtime bars ``bar.date`` holds a naive-UTC datetime (matches
+    the ``RealTimeBar.time`` shape the adapter reads from).
     """
     # --- Convert time to configured timezone here ---
 
-    bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(settings.TIMEZONE))
+    bar_time_local = bar.date.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(settings.TIMEZONE))
     interval_time = get_2min_interval(bar_time_local)
     last_candle = store.get_last(symbol)
 
@@ -131,7 +137,7 @@ async def process_bar(store: CandleStore,
     _record_5s_tick(
         symbol=symbol,
         bar_dt=bar_time_local,
-        open_=bar.open_,
+        open_=bar.open,
         high=bar.high,
         low=bar.low,
         close=bar.close,

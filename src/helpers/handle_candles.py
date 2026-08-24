@@ -5,7 +5,7 @@ import logging
 from collections import defaultdict, deque
 from datetime import datetime
 
-from ib_async import RealTimeBar
+from data_sources._bar import IncomingBar
 
 logger = logging.getLogger(__name__)  # module-specific logger
 
@@ -83,7 +83,7 @@ def enforce_candle_row_types(candle: CandleRow) -> CandleRow:
     )
 
 
-def stream_data_to_candle_row(symbol: str, bar: RealTimeBar, bar_time_local: datetime) -> CandleRow:
+def stream_data_to_candle_row(symbol: str, bar: IncomingBar, bar_time_local: datetime) -> CandleRow:
     """
     Minimal CandleRow synthesized from a 5-sec bar. Indicator fields
     (vwap/ema9/relatR/rvol/avg_volume) aren't meaningful for a 5-sec

@@ -35,7 +35,7 @@ import logging
 from datetime import time
 from zoneinfo import ZoneInfo
 
-from ib_async import RealTimeBar
+from data_sources._bar import IncomingBar
 
 from src.core.config import settings
 from src.database.db_functions import get_session_rows
@@ -66,9 +66,9 @@ hooks = make_hooks(viz)
 # =============================================================================
 
 
-async def orb_breakout_long(bar: RealTimeBar, symbol: str) -> None:
+async def orb_breakout_long(bar: IncomingBar, symbol: str) -> None:
 
-    bar_time_local = bar.time.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(settings.TIMEZONE))
+    bar_time_local = bar.date.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(settings.TIMEZONE))
     today = bar_time_local.date()
 
     # Chart animates on every tick regardless of what branch we take below.
