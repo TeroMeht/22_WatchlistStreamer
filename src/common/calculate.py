@@ -61,10 +61,40 @@ def calculate_relatr(intraday_df: pd.DataFrame, last_atr_per_symbol: dict) -> pd
     intraday_df['Relatr'] = ((intraday_df['VWAP'] - intraday_df['Close']) / intraday_df['Relatr']).round(2)
     return intraday_df
 
-def calculate_avg_volume_model(day5_history_datas: pd.DataFrame)-> pd.DataFrame:
+# Winsorization ceiling for the per-slot volume sample used by the
+# ``calculate_avg_volume_model`` baseline. Any single-session per-slot
+# volume greater than ``AVG_VOLUME_WINSOR_K * median(slot)`` is clipped
+# down to that ceiling BEFORE the slot mean is computed.
+#
+# Motivation -- the "shifting baseline" problem:
+# Rvol = today_volume / avg_of_past_N_sessions. If one of those past
+# sessions was a genuine spike day (catalyst, earnings, sympathy move),
+# its huge volume drags the average up, and the NEXT day's still-
+# elevated (but not extreme) volume divides into an inflated denominator
+# and falls below the Rvol>=3 filter. Continuation opportunities get
+# silently suppressed by yesterday's event.
+#
+# Median-based cap because the median is robust by construction: the
+# very spike we want to neutralize cannot distort its own ceiling.
+# k=3 leaves ordinary "busy" days untouched (a 2-3x-normal day lands
+# within the cap and is averaged in as-is) but pulls a 10x spike back
+# to 3x median before it enters the mean. Slots whose median is zero
+# (dead pre/post-market intervals) are skipped -- clipping there would
+# be a no-op anyway.
+AVG_VOLUME_WINSOR_K: float = 3.0
+
+
+def calculate_avg_volume_model(day5_history_datas: pd.DataFrame) -> pd.DataFrame:
     """
     Combine 5 days of intraday data and calculate the average volume
     for each Symbol-Time combination.
+
+    Per-slot volumes are WINSORIZED before averaging: any single
+    session's volume in a (Symbol, Time) bucket that exceeds
+    ``AVG_VOLUME_WINSOR_K`` times the bucket's median is clipped down
+    to that ceiling. See ``AVG_VOLUME_WINSOR_K`` above for the full
+    rationale. This is what lets a day-after-a-spike stock still fire
+    Rvol>=3 in continuation.
 
     Parameters
     ----------
@@ -78,10 +108,32 @@ def calculate_avg_volume_model(day5_history_datas: pd.DataFrame)-> pd.DataFrame:
         A single DataFrame (average day model) with columns:
         ['Symbol', 'Time', 'Avg_volume']
     """
-    # Combine all 5 days
+    # Combine all sessions.
     all_data = pd.concat(day5_history_datas, ignore_index=True)
 
-    # Group by Symbol and Time, compute mean volume
+    # Winsorize per (Symbol, Time) slot. Vectorized via groupby.transform
+    # so the whole pass is one median compute + one mask + one assign.
+    # Median-zero slots keep their original values (clipping would be a
+    # no-op there anyway).
+    grp_vol = all_data.groupby(['Symbol', 'Time'])['Volume']
+    med = grp_vol.transform('median')
+    cap = AVG_VOLUME_WINSOR_K * med
+    to_clip = (med > 0) & (all_data['Volume'] > cap)
+    n_clipped = int(to_clip.sum())
+    if n_clipped:
+        # Log how much clipping actually happened so operators can spot
+        # a symbol/session that would otherwise silently poison the
+        # baseline. Info level so it's visible in a normal warmup log
+        # without turning on debug.
+        logger.info(
+            "avg_volume winsorization: clipped %d/%d (Symbol,Time) rows "
+            "at k=%.1f x median",
+            n_clipped, len(all_data), AVG_VOLUME_WINSOR_K,
+        )
+        all_data.loc[to_clip, 'Volume'] = cap[to_clip]
+
+    # Group by Symbol and Time, compute the mean of the (now winsorized)
+    # per-slot volumes.
     avg_volume_df = (
         all_data.groupby(['Symbol', 'Time'], as_index=False)['Volume']
         .mean()

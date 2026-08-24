@@ -58,16 +58,10 @@ _replay_start_cache: datetime | None = None
 
 def get_replay_start_datetime() -> datetime:
     """
-    Earliest bar timestamp across all CSVs in ``REPLAY_DATA_DIR``,
-    returned as a tz-aware datetime in ``settings.TIMEZONE``.
+    Earliest bar timestamp across all CSVs in ``REPLAY_DATA_DIR`` that
+    passes the ``REPLAY_START_TIME`` cutoff (if any), returned as a
+    tz-aware datetime in ``settings.TIMEZONE``.
 
-    Used by the IB warmup path so historical fetches (daily bars for
-    ATR, 2-min intraday for Rvol model) end at the replay date's
-    session-open instead of wall-clock "now" -- otherwise the streamer
-    would warm up against data from AFTER the replay window.
-
-    Peeks at only the first parseable row of each CSV, so it's cheap
-    even with lots of files. Cached on first call.
     """
     global _replay_start_cache
     if _replay_start_cache is not None:
@@ -83,6 +77,7 @@ def get_replay_start_datetime() -> datetime:
     )
 
     tz = ZoneInfo(settings.TIMEZONE)
+    cutoff = settings.REPLAY_START_TIME  # datetime.time or None
     candidates: list[datetime] = []
 
     for path in csv_files:
@@ -97,16 +92,26 @@ def get_replay_start_datetime() -> datetime:
                     ts = ts.replace(tzinfo=tz)
                 else:
                     ts = ts.astimezone(tz)
+                # Enforce the optional REPLAY_START_TIME cutoff BEFORE
+                # accepting this row as the file's start. Otherwise the
+                # anchor would fall in the skipped pre-cutoff region
+                # and warmup would end at the wrong instant.
+                if cutoff is not None and ts.timetz().replace(tzinfo=None) < cutoff:
+                    continue
                 candidates.append(ts)
-                break  # first parseable row per file is enough
+                break  # first row past the cutoff per file is enough
 
     if not candidates:
         raise RuntimeError(
-            f"Cannot determine replay start: no parseable timestamps in {data_path}"
+            f"Cannot determine replay start: no parseable timestamps in "
+            f"{data_path} at or after REPLAY_START_TIME={cutoff}"
         )
 
     _replay_start_cache = min(candidates)
-    logger.info("[replay] start datetime resolved to %s", _replay_start_cache)
+    logger.info(
+        "[replay] start datetime resolved to %s (cutoff=%s)",
+        _replay_start_cache, cutoff,
+    )
     return _replay_start_cache
 
 
@@ -208,9 +213,17 @@ def _load_csv(path: Path, tz: ZoneInfo) -> tuple[str | None, list[SimpleNamespac
     rows disagree they're dropped with a warning (one file = one symbol).
     Bars are returned in file order, which for a well-formed export is
     already chronological.
+
+    Applies ``settings.REPLAY_START_TIME`` (if set) as a per-row
+    wall-clock cutoff -- rows whose local time-of-day is before the
+    cutoff are silently dropped. Matches the anchor logic in
+    ``get_replay_start_datetime`` so both dispatch AND warmup start at
+    the same instant.
     """
     bars: list[SimpleNamespace] = []
     file_symbol: str | None = None
+    cutoff = settings.REPLAY_START_TIME  # datetime.time or None
+    skipped_before_cutoff = 0
 
     with path.open("r", encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
@@ -227,7 +240,28 @@ def _load_csv(path: Path, tz: ZoneInfo) -> tuple[str | None, list[SimpleNamespac
                     path.name, sym, file_symbol,
                 )
                 continue
+
+            # Wall-clock cutoff. ``bar.time`` is naive UTC (matches
+            # ib_async.RealTimeBar.time -- see the module docstring),
+            # so convert back to the display tz to compare against a
+            # local time-of-day like 16:30.
+            if cutoff is not None:
+                local_t = (
+                    bar.time.replace(tzinfo=ZoneInfo("UTC"))
+                    .astimezone(tz)
+                    .time()
+                )
+                if local_t < cutoff:
+                    skipped_before_cutoff += 1
+                    continue
+
             bars.append(bar)
+
+    if skipped_before_cutoff:
+        logger.info(
+            "[replay] %s: dropped %d rows before REPLAY_START_TIME=%s",
+            path.name, skipped_before_cutoff, cutoff,
+        )
 
     return file_symbol, bars
 

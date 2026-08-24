@@ -1,33 +1,30 @@
 from datetime import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
+# IB connection fields (IB_HOST / IB_PORT / IB_CLIENT_ID /
+# IB_CONNECT_TIMEOUT_S) come from this mixin -- declared in ONE place
+# across every project that talks to IB. Env-key names unchanged, so
+# the existing ``22_WatchlistStreamer.env`` file keeps working.
+from data_sources.ib._config import IBSourceConfig
 
-class Settings(BaseSettings):
+
+class Settings(IBSourceConfig, BaseSettings):
 
     DATABASE_URL: str
 
     # --- Runtime mode ---
-    # "live"   -> subscribe to IB real-time bars (production).
-    # "replay" -> feed bars from CSVs on disk via src/streamer/replay.py.
-    # Also gates alarm dispatch (no Telegram/POST in replay) and the DB
-    # pool selection (REPLAY_DATABASE_URL when set).
     MODE: str
 
     # --- Replay-only settings (ignored in live mode) ---
-    # Symbol + date are read from the CSV rows themselves (columns
-    # ``symbol`` and ``time``), so REPLAY_DATA_DIR just points at the
-    # flat folder full of ``*.csv`` files.
     REPLAY_DATABASE_URL: str
     REPLAY_DATA_DIR: Path
     REPLAY_SPEED: float          # 0 = instant, 1.0 = realtime, N = Nx
+    REPLAY_START_TIME: time
 
-    # --- Interactive Brokers ---
-    IB_HOST: str
-    IB_PORT: int
-    IB_CLIENT_ID: int
+    # IB_HOST / IB_PORT / IB_CLIENT_ID inherited from IBSourceConfig above.
 
     # --- Telegram ---
     TELEGRAM_BOT_TOKEN: str
@@ -49,22 +46,27 @@ class Settings(BaseSettings):
     RVOL_THRESHOLD: float
 
     TIMEZONE: str
+
+    # --- Warmup data source ---
+    HISTORY_SOURCE: str
+
+    POLYGON_API_KEY: str
+    POLYGON_BASE_URL: str
+
     EXIT_REQUEST_ENDPOINT: str
-    # POST endpoint on the trade backend for automatic entry requests.
-    # The streamer fires this when a strategy's entry conditions trigger;
-    # the backend runs its guards (block window, attempts, cooldowns, ...)
-    # and parks the priced order for user acceptance via the FE dialog.
-    # request_type="automatic" in the payload is what routes it there.
-    ENTRY_REQUEST_ENDPOINT: str
     ALARMS_ENDPOINT: str
     STREAMER_START_ENDPOINT: str
-
+    ENTRY_REQUEST_ENDPOINT: str
 
 
     # --- Validators ---
-    @field_validator("ENDOFDAY", "SESSION_START", mode="before")
+    @field_validator("ENDOFDAY", "SESSION_START", "REPLAY_START_TIME", mode="before")
     def parse_time_fields(cls, v: Any) -> Any:
-        """Accept ``HH:MM`` in addition to ISO ``HH:MM:SS``."""
+        """Accept ``HH:MM`` in addition to ISO ``HH:MM:SS``. Passes
+        through ``None`` / empty string unchanged so the Optional
+        ``REPLAY_START_TIME`` can stay unset."""
+        if v is None or v == "":
+            return None
         if isinstance(v, str) and v.count(":") == 1:
             return f"{v}:00"
         return v
@@ -85,12 +87,15 @@ class Settings(BaseSettings):
             raise ValueError(f"MODE must be 'live' or 'replay', got {v!r}")
         return v
 
+    @field_validator("HISTORY_SOURCE")
+    def validate_history_source(cls, v: str) -> str:
+        v = (v or "ib").lower()
+        if v not in ("ib", "polygon"):
+            raise ValueError(f"HISTORY_SOURCE must be 'ib' or 'polygon', got {v!r}")
+        return v
+
 
     class Config:
-        # Centralized env-file repository (shared across all projects).
-        # Runtime mode is selected via the MODE setting inside this file
-        # (or overridden per-run via the MODE environment variable, which
-        # pydantic-settings prefers over the file value).
         ENV_REPO = Path("C:/codebase/env-repo")
         env_file = ENV_REPO / "22_WatchlistStreamer.env"
         env_file_encoding = "utf-8"

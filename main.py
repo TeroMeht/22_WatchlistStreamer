@@ -1,5 +1,7 @@
 import asyncio
 
+from data_sources.ib._client import disconnect as ib_disconnect
+
 from src.common.logging_config import setup_logging
 from src.dependencies import close_db_pool
 from src.streamer.datastreamer import data_pipe
@@ -16,11 +18,12 @@ setup_logging()
 
 
 async def main() -> None:
-    ib = None
+    source = None
     try:
-        # Process-level init: DB pool + IB connection + PID ping + dashboard.
-        # Returns the connected IB client we hand to data_pipe.
-        ib = await initialize_app()
+        # Process-level init: DB pool + IBSource (lazy-connect) + PID
+        # ping + dashboard. ``source`` is None when this run doesn't
+        # need IB at all (replay + polygon combo).
+        source = await initialize_app()
 
         # All DB table setup in one place: alarms/orders + archive+wipe
         # of the per-symbol livestream tables.
@@ -37,14 +40,14 @@ async def main() -> None:
         register_monitor_set(monitor_set)
 
         # Data pipeline (fetch/validate/calc/warmup) + live streamer tail.
-        await data_pipe(ib, monitor_set)
+        await data_pipe(source, monitor_set)
 
     finally:
         # Always close pool + disconnect on shutdown, whether the app
         # initialized fully or bailed early.
         await close_db_pool()
-        if ib is not None:
-            ib.disconnect()
+        if source is not None:
+            ib_disconnect(source)
 
 
 # --- Script execution ---

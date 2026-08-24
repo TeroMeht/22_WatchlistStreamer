@@ -8,50 +8,14 @@ from src.database.db_functions import *
 # Tämä on erillinen koodikirjasto jolla käsittelen sisään tulevia bars dataa pandas dataframeiksi
 logger = logging.getLogger(__name__)  # module-specific logger
 
-from dataclasses import dataclass, asdict
-from datetime import datetime
-from typing import Optional
+from dataclasses import asdict
 from zoneinfo import ZoneInfo
 
 from src.core.config import settings
 
 
-@dataclass
-class IncomingBar:
-    date: datetime
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-    average: Optional[float]
-    barCount: Optional[int]
+from data_sources._bar import IncomingBar
 
-
-def incoming_bars_to_datamodel_format(bars) -> List[IncomingBar]:
-    """
-    Convert a list of raw IBKR bar objects into a list of IncomingBar dataclasses.
-    
-    Each bar must have attributes: date, open, high, low, close, volume
-    Optional: average, barCount
-    """
-    incoming_bars = []
-    
-    for bar in bars:
-        incoming_bars.append(
-            IncomingBar(
-                date=bar.date,
-                open=bar.open,
-                high=bar.high,
-                low=bar.low,
-                close=bar.close,
-                volume=bar.volume,
-                average=getattr(bar, "average", None),
-                barCount=getattr(bar, "barCount", None)
-            )
-        )
-
-    return incoming_bars
 
 def intraday_datapipe(bars: List[IncomingBar]) -> pd.DataFrame:
     """
@@ -101,7 +65,7 @@ def daily_datapipe(bars: List[IncomingBar]) -> pd.DataFrame:
 def handle_incoming_dataframe_daily(bars: List[IncomingBar], symbol:str)-> pd.DataFrame:
 
 
-    incoming_bars = incoming_bars_to_datamodel_format(bars)
+    incoming_bars = IncomingBar.from_raw_bars(bars)
 
     df = daily_datapipe(incoming_bars)
     
@@ -123,9 +87,18 @@ def handle_incoming_dataframe_daily(bars: List[IncomingBar], symbol:str)-> pd.Da
     return df
 
 def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:str)-> pd.DataFrame:
+    """
+    LEGACY -- combined today/past split used by the Polygon warmup path.
 
+    Kept because Polygon still fetches a single window that contains BOTH
+    the past 5 days AND today's session-so-far, so it needs the internal
+    split. IB now fetches those two windows separately (see
+    ``bars_to_today_frame`` + ``bars_to_avg_volume_frame`` below and the
+    three-way call in ``datastreamer._fetch_history_data``); drop this
+    function once the Polygon path is refactored to match.
+    """
     # Step 1: Convert to dataclasses
-    incoming_bars = incoming_bars_to_datamodel_format(bars)
+    incoming_bars = IncomingBar.from_raw_bars(bars)
 
     # Step 2: Convert to DataFrame
     df = intraday_datapipe(incoming_bars)
@@ -160,6 +133,65 @@ def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:s
         "Symbol","Date","Time","Open","High","Low","Close","Volume","VWAP","EMA9"
     ]]
     return df_today,df_past
+
+
+# ---------------------------------------------------------------------------
+# Focused pipeline transforms -- one function per output frame.
+# Used by the IB three-way fetch path (see datastreamer._fetch_history_data).
+# ---------------------------------------------------------------------------
+
+
+def bars_to_today_frame(bars: List[IncomingBar], symbol: str) -> pd.DataFrame:
+    """
+    Today's 2-min bars -> today_df with VWAP + EMA9 seeded.
+
+    Consumer of the ``fetch_intraday_live`` fetch: bars are already
+    scoped to the current session (session-start ... now, or session-
+    start ... replay-start), so there's no need to split today vs past
+    inside this function.
+
+    Applies the >= 11:00 Helsinki filter to match the legacy behavior.
+    Returns the same column set the old
+    ``handle_incoming_dataframe_intradays_volume`` produced for its
+    today half, so downstream ``handle_intraday_rvol_dataset`` keeps
+    working unchanged.
+    """
+    incoming_bars = IncomingBar.from_raw_bars(bars)
+    df = intraday_datapipe(incoming_bars)
+    df["Symbol"] = symbol
+    df["Date"] = pd.to_datetime(df["Date"]).dt.date
+
+    df = df[df["Time"] >= time(11, 0)]
+
+    df = calculate_vwap(df)
+    df = calculate_ema(df, period=9)
+
+    return df[[
+        "Symbol", "Date", "Time", "Open", "High", "Low",
+        "Close", "Volume", "VWAP", "EMA9",
+    ]]
+
+
+def bars_to_avg_volume_frame(bars: List[IncomingBar], symbol: str) -> pd.DataFrame:
+    """
+    Past N sessions of 2-min bars -> past_df with the Avg_volume baseline
+    applied (winsorized -- see ``calculate.calculate_avg_volume_model``).
+
+    Consumer of the ``fetch_intraday_history`` fetch: bars end BEFORE the
+    live/replay session start, so no today/past split is needed here.
+    Returns the same column set the old
+    ``handle_incoming_dataframe_intradays_volume`` produced for its past
+    half, so downstream ``handle_intraday_rvol_dataset`` keeps working
+    unchanged.
+    """
+    incoming_bars = IncomingBar.from_raw_bars(bars)
+    df = intraday_datapipe(incoming_bars)
+    df["Symbol"] = symbol
+    df["Date"] = pd.to_datetime(df["Date"]).dt.date
+
+    df = df[["Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume"]]
+
+    return calculate_avg_volume_model([df])
 
 
 

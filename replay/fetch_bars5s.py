@@ -23,8 +23,8 @@ from pathlib import Path
 from ib_async import IB, Stock
 
 # ============ CONFIG ============
-SYMBOL      = "TEM"
-DATE        = "2026-08-20"          # YYYY-MM-DD (local calendar date)
+SYMBOL      = "MRNA"
+DATE        = "2026-08-19"          # YYYY-MM-DD (local calendar date)
 EXCHANGE    = "SMART"
 CURRENCY    = "USD"
 
@@ -32,7 +32,7 @@ HOST        = "127.0.0.1"
 PORT        = 4002                  # 7497 paper TWS, 7496 live TWS, 4002/4001 gateway
 CLIENT_ID   = 20
 
-USE_RTH     = False                  # True = regular trading hours only
+USE_RTH     = False                 # True = regular trading hours only
 TIMEZONE    = "Europe/Helsinki"     # output timestamp tz (matches settings.TIMEZONE)
 
 # Strategy row that gets attached to SYMBOL when the watchlist SQL is
