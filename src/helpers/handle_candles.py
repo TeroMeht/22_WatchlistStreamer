@@ -61,6 +61,7 @@ class CandleRow:
     avg_volume: float
     rvol: float
     relatR: float
+    day_atr_ext: float
 
 
 def enforce_candle_row_types(candle: CandleRow) -> CandleRow:
@@ -78,7 +79,8 @@ def enforce_candle_row_types(candle: CandleRow) -> CandleRow:
         ema9=float(candle.ema9),
         avg_volume=float(candle.avg_volume),
         rvol=float(candle.rvol),
-        relatR=float(candle.relatR)
+        relatR=float(candle.relatR),
+        day_atr_ext=float(candle.day_atr_ext),
 
     )
 
@@ -105,4 +107,5 @@ def stream_data_to_candle_row(symbol: str, bar: IncomingBar, bar_time_local: dat
         avg_volume=0.0,
         rvol=0.0,
         relatR=0.0,
+        day_atr_ext=0.0,
     )

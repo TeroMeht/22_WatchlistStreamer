@@ -61,6 +61,28 @@ def calculate_relatr(intraday_df: pd.DataFrame, last_atr_per_symbol: dict) -> pd
     intraday_df['Relatr'] = ((intraday_df['VWAP'] - intraday_df['Close']) / intraday_df['Relatr']).round(2)
     return intraday_df
 
+
+def calculate_day_atr_ext(
+    intraday_df: pd.DataFrame,
+    last_atr_per_symbol: dict,
+    last_prev_close_per_symbol: dict,
+) -> pd.DataFrame:
+    """
+    Day-level ATR extension from yesterday's close.
+
+    DayAtrExt = (Prev_Close - Close) / ATR
+
+    Positive => price is below yesterday's close (bearish extension),
+    matching Relatr's "positive = below reference" sign convention.
+    Captures the full move including any pre/after-market gap, unlike
+    Relatr which anchors on today's intraday VWAP.
+    """
+    intraday_df = intraday_df.copy()
+    atr        = intraday_df['Symbol'].map(last_atr_per_symbol).fillna(1)
+    prev_close = intraday_df['Symbol'].map(last_prev_close_per_symbol)
+    intraday_df['DayAtrExt'] = ((prev_close - intraday_df['Close']) / atr).round(2)
+    return intraday_df
+
 # Winsorization ceiling for the per-slot volume sample used by the
 # ``calculate_avg_volume_model`` baseline. Any single-session per-slot
 # volume greater than ``AVG_VOLUME_WINSOR_K * median(slot)`` is clipped
@@ -207,6 +229,23 @@ def calculate_next_relatr(candle: CandleRow, atr_value: float) -> CandleRow:
     except Exception as e:
         logging.exception("Error calculating RelATR for %s: %s", candle.symbol, e)
         candle.relatR = 0.0
+
+    return candle
+
+
+def calculate_next_day_atr_ext(
+    candle: CandleRow, atr_value: float, prev_close: float,
+) -> CandleRow:
+    """
+    Live counterpart to ``calculate_day_atr_ext``. Same formula and
+    sign convention: positive => close is below yesterday's close.
+    """
+    try:
+        candle.day_atr_ext = round((prev_close - candle.close) / atr_value, 2)
+
+    except Exception as e:
+        logging.exception("Error calculating DayAtrExt for %s: %s", candle.symbol, e)
+        candle.day_atr_ext = 0.0
 
     return candle
 

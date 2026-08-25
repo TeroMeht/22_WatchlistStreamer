@@ -50,6 +50,7 @@ async def archive_livestream_tables() -> None:
                 "Avg_volume" NUMERIC(18, 2),
                 "Rvol" NUMERIC(10, 2),
                 "Relatr" NUMERIC(10, 2),
+                "DayAtrExt" NUMERIC(10, 2),
                 UNIQUE ("Symbol", "Date", "Time")
             );
         """)
@@ -70,11 +71,11 @@ async def archive_livestream_tables() -> None:
                 result = await conn.execute(f"""
                     INSERT INTO bars_2m_archive (
                         "Symbol", "Date", "Time", "Open", "High", "Low", "Close",
-                        "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr"
+                        "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr", "DayAtrExt"
                     )
                     SELECT
                         "Symbol", "Date", "Time", "Open", "High", "Low", "Close",
-                        "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr"
+                        "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr", "DayAtrExt"
                     FROM "{tname}"
                     ON CONFLICT ("Symbol", "Date", "Time") DO NOTHING;
                 """)
@@ -161,7 +162,7 @@ async def create_and_fill_table_async(df: pd.DataFrame)-> None:
     # via numpy buffers -- typically 5-10x faster on multi-row frames and
     # produces tuples already in the right column order for the INSERT.
     _cols = ["Symbol", "Date", "Time", "Open", "High", "Low", "Close",
-             "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr"]
+             "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr", "DayAtrExt"]
     data = list(df[_cols].itertuples(index=False, name=None))
 
     create_table_sql = f"""
@@ -178,7 +179,8 @@ async def create_and_fill_table_async(df: pd.DataFrame)-> None:
         "EMA9" NUMERIC(10, 2),
         "Avg_volume" NUMERIC(18, 2),
         "Rvol" NUMERIC(10, 2),
-        "Relatr" NUMERIC(10, 2)
+        "Relatr" NUMERIC(10, 2),
+        "DayAtrExt" NUMERIC(10, 2)
     );
     """
 
@@ -193,8 +195,8 @@ async def create_and_fill_table_async(df: pd.DataFrame)-> None:
 
     insert_sql = f"""
     INSERT INTO {table_name}
-    ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr")
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
+    ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr", "DayAtrExt")
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
     """
 
     conn = None
@@ -308,6 +310,7 @@ async def insert_candlestick_row(last_candle: CandleRow):
             last_candle.avg_volume,
             last_candle.rvol,
             last_candle.relatR,
+            last_candle.day_atr_ext,
         )
 
         # --- Check if record already exists ---
@@ -324,8 +327,8 @@ async def insert_candlestick_row(last_candle: CandleRow):
         # --- Insert new record ---
         insert_sql = f"""
         INSERT INTO "{table_name}" 
-        ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9","Avg_volume", "Rvol","Relatr")
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13);
+        ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9","Avg_volume", "Rvol","Relatr","DayAtrExt")
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14);
         """
         await conn.execute(insert_sql, *db_row)
         logging.debug(f"Inserted candle into '{symbol}': {last_candle}")
@@ -453,7 +456,7 @@ async def get_session_rows(table_name: str, day, since_time):
 
         df = pd.DataFrame([dict(r) for r in rows])
         # Decimal -> float (matches get_last_rows)
-        numeric_cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr"]
+        numeric_cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr", "DayAtrExt"]
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = df[col].astype(float)
@@ -502,7 +505,7 @@ async def get_last_rows(table_name:str, num_rows:int):
         # Convert asyncpg records to DataFrame
         df = pd.DataFrame([dict(r) for r in rows])
                 # Convert numeric columns (which come as Decimal) to float
-        numeric_cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr"]
+        numeric_cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr", "DayAtrExt"]
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = df[col].astype(float)

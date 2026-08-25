@@ -67,8 +67,10 @@ def _validate_tickers(
 
 def _calculate_indicators(daily_data: list, today_intradaydata: list, past_intradaydata: list) -> tuple:
     rvol_dataset = handle_intraday_rvol_dataset(today_intradaydata, past_intradaydata)
-    relatr_datasets, last_atr_dict = handle_Atr_intraday_dataset(rvol_dataset, daily_data)
-    return relatr_datasets, last_atr_dict
+    relatr_datasets, last_atr_dict, last_prev_close_dict = handle_Atr_intraday_dataset(
+        rvol_dataset, daily_data,
+    )
+    return relatr_datasets, last_atr_dict, last_prev_close_dict
 
 
 # =============================================================================
@@ -107,7 +109,9 @@ async def data_pipe(warmup_source: WarmupSource, live_source: LiveSource, monito
         logging.error("No valid tickers found in all datasets. Aborting.")
         return
 
-    relatr_datasets, last_atr_dict = _calculate_indicators(daily_data, today_intradaydata, past_intradaydata)
+    relatr_datasets, last_atr_dict, last_prev_close_dict = _calculate_indicators(
+        daily_data, today_intradaydata, past_intradaydata,
+    )
 
     await _fill_database_tables_with_enriched_data(relatr_datasets, past_intradaydata)
 
@@ -116,4 +120,4 @@ async def data_pipe(warmup_source: WarmupSource, live_source: LiveSource, monito
     warmup.warmup_from_daily(daily_data)
 
     # Hand off to the live streamer (or CSV replay -- same interface).
-    await live_source.run(valid_tickers, last_atr_dict)
+    await live_source.run(valid_tickers, last_atr_dict, last_prev_close_dict)

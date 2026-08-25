@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from data_sources._bar import IncomingBar
 
 from src.common.calculate import (
+    calculate_next_day_atr_ext,
     calculate_next_ema9,
     calculate_next_relatr,
     calculate_next_rvol,
@@ -35,7 +36,9 @@ _record_5s_tick = candle_timeline.record_5s_tick
 
 
 
-async def handle_incoming_candle(candle: CandleRow, atr_value:float) -> CandleRow:
+async def handle_incoming_candle(
+    candle: CandleRow, atr_value: float, prev_close: float,
+) -> CandleRow:
     try:
         df_from_db, avg_volume = await asyncio.gather(
             get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=None),
@@ -46,6 +49,7 @@ async def handle_incoming_candle(candle: CandleRow, atr_value:float) -> CandleRo
         candle = calculate_next_vwap(candle, df_from_db)
         candle = calculate_next_ema9(candle, df_from_db)
         candle = calculate_next_relatr(candle, atr_value)
+        candle = calculate_next_day_atr_ext(candle, atr_value, prev_close)
         candle = calculate_next_rvol(candle,df_from_db, candle.avg_volume)
         return candle
     except Exception as e:
@@ -57,6 +61,7 @@ async def handle_incoming_candle(candle: CandleRow, atr_value:float) -> CandleRo
 
 async def finalize_candle(last_candle,
                           atr_value: float,
+                          prev_close: float,
                           symbol: str,
                           price):
     """Finalize previous candle, enqueue DB write, and run strategy checks."""
@@ -76,14 +81,15 @@ async def finalize_candle(last_candle,
                             vwap=None,  # to be calculated
                             ema9=None,
                             relatR=None,
+                            day_atr_ext=None,
                             avg_volume=None,
                             rvol=None
                         )
     # calculations
-    last_candle = await handle_incoming_candle(last_candle, atr_value)
+    last_candle = await handle_incoming_candle(last_candle, atr_value, prev_close)
 
     db_ready_candle = enforce_candle_row_types(last_candle)  # Ensure all floats
-    logger.debug(f"Finalized candle for {symbol} at {last_candle.time}: O={last_candle.open}, H={last_candle.high}, L={last_candle.low}, C={last_candle.close}, V={last_candle.volume}, VWAP={last_candle.vwap}, EMA9={last_candle.ema9}, RelatR={last_candle.relatR}, AvgVol={last_candle.avg_volume}, RVol={last_candle.rvol}")
+    logger.info(f"Finalized candle for {symbol} at {last_candle.time}: O={last_candle.open}, H={last_candle.high}, L={last_candle.low}, C={last_candle.close}, V={last_candle.volume}, VWAP={last_candle.vwap}, EMA9={last_candle.ema9}, RelatR={last_candle.relatR}, AvgVol={last_candle.avg_volume}, RVol={last_candle.rvol}, ATRExt={last_candle.day_atr_ext}")
     await insert_candlestick_row(db_ready_candle)
 
     # Push the finalized 2-min candle to the SHARED candle timeline once;
@@ -113,6 +119,7 @@ async def finalize_candle(last_candle,
 
 async def process_bar(store: CandleStore,
                       atr_value: float,
+                      prev_close: float,
                       symbol: str,
                       bar: IncomingBar):
     """
@@ -155,7 +162,7 @@ async def process_bar(store: CandleStore,
             # First, apply the last bar to the previous candle
             store.update_candle(symbol, bar.close, bar.volume)
             # Then finalize
-            await finalize_candle(last_candle, atr_value, symbol, bar.close)
+            await finalize_candle(last_candle, atr_value, prev_close, symbol, bar.close)
 
         # Start a new candle for the current interval
         store.append_candle(symbol, {

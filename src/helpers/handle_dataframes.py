@@ -199,26 +199,44 @@ def build_last_atr_dict(daily_with_atr: Dict[str, pd.DataFrame]) -> Dict[str, fl
     """Latest ATR per symbol from the daily-bars dict keyed by Symbol."""
     return {symbol: df['ATR'].iloc[-1] for symbol, df in daily_with_atr.items()}
 
+
+def build_last_prev_close_dict(daily_with_atr: Dict[str, pd.DataFrame]) -> Dict[str, float]:
+    """
+    Yesterday's close per symbol -- the last row of the daily frame.
+
+    The daily fetch window ends at yesterday 23:59:59 (see
+    ``warmup_source._window_ends``), so the last row IS yesterday's
+    session close, not the day-before-yesterday's. Used to anchor
+    ``DayAtrExt`` (the day-level ATR extension metric that captures
+    pre/after-market gaps in addition to the intraday move).
+    """
+    return {symbol: float(df['Close'].iloc[-1]) for symbol, df in daily_with_atr.items()}
+
 def handle_Atr_intraday_dataset(
     intraday_results: dict[str, pd.DataFrame],
     daily_with_atr: dict[str, pd.DataFrame],
-) -> tuple[dict[str, pd.DataFrame], dict[str, float]]:
+) -> tuple[dict[str, pd.DataFrame], dict[str, float], dict[str, float]]:
 
     relatr_datasets = {}
 
-    # Build last ATR dictionary
-    last_atr_per_symbol = build_last_atr_dict(daily_with_atr)
+    # Build last ATR + yesterday's-close dictionaries (both keyed by Symbol).
+    last_atr_per_symbol        = build_last_atr_dict(daily_with_atr)
+    last_prev_close_per_symbol = build_last_prev_close_dict(daily_with_atr)
 
     # Desired column order
     cols_order = [
         'Symbol', 'Date', 'Time', 'Open', 'High', 'Low', 'Close',
-        'Volume', 'VWAP', 'EMA9', 'Avg_volume', 'Rvol', 'Relatr'
+        'Volume', 'VWAP', 'EMA9', 'Avg_volume', 'Rvol', 'Relatr', 'DayAtrExt'
     ]
 
     # Upstream validate_tickers guarantees every frame here is non-empty.
     for symbol, intraday_df in intraday_results.items():
-        # Calculate Relatr using the existing intraday DataFrame
+        # Intraday-VWAP extension (existing) + day-level extension from
+        # yesterday's close (new -- catches pre/after-market gaps).
         intraday_df = calculate_relatr(intraday_df, last_atr_per_symbol)
+        intraday_df = calculate_day_atr_ext(
+            intraday_df, last_atr_per_symbol, last_prev_close_per_symbol,
+        )
 
         # Reorder columns
         intraday_df = intraday_df[cols_order]
@@ -226,7 +244,7 @@ def handle_Atr_intraday_dataset(
         relatr_datasets[symbol] = intraday_df
         logger.debug(f"{symbol} - last 10 rows:\n{intraday_df.tail(10)}")
 
-    return relatr_datasets, last_atr_per_symbol
+    return relatr_datasets, last_atr_per_symbol, last_prev_close_per_symbol
 
 def handle_intraday_rvol_dataset(
     today_intra: dict[str, pd.DataFrame],

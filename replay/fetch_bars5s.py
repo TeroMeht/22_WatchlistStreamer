@@ -23,8 +23,8 @@ from pathlib import Path
 from ib_async import IB, Stock
 
 # ============ CONFIG ============
-SYMBOL      = "MRNA"
-DATE        = "2026-08-19"          # YYYY-MM-DD (local calendar date)
+SYMBOL      = "SNDK"
+DATE        = "2026-08-24"          # YYYY-MM-DD (local calendar date)
 EXCHANGE    = "SMART"
 CURRENCY    = "USD"
 
@@ -39,7 +39,7 @@ TIMEZONE    = "Europe/Helsinki"     # output timestamp tz (matches settings.TIME
 # regenerated at the end of the run. Keep in the CONFIG block so a single
 # edit to (SYMBOL, DATE, STRATEGY) drives the CSV name, the CSV contents,
 # and the watchlist row the replay run will actually pick up.
-STRATEGY    = "vwap_continuation_long"
+STRATEGY    = "reversal_long"
 
 # Hard-coded output directory + file. Every replay run points the streamer
 # at OUT_DIR, so we scrub *.csv there before fetching -- otherwise stale
