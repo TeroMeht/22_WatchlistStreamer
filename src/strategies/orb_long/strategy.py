@@ -137,7 +137,7 @@ async def orb_breakout_long(bar: IncomingBar, symbol: str) -> None:
     # Stop sits below the LOW OF DAY: the lowest ``Low`` across every
     # 2-min bar in ``{symbol}_livestream`` since ``settings.SESSION_START``
     # (default 16:30). The DB query is already filtered to today +
-    # since_time, so ``df["Low"].min()`` is the session low across
+    # since_time, so ``df["low"].min()`` is the session low across
     # finalized 2-min bars. We also fold in the current 5-sec ``bar.low``
     # -- the in-progress 2-min bar hasn't been finalized to the DB yet,
     # so if this tick just printed a new session low the DB min alone
@@ -154,7 +154,7 @@ async def orb_breakout_long(bar: IncomingBar, symbol: str) -> None:
         )
         stop_reference = float(breakout_level.ref_low)
     else:
-        stop_reference = min(float(df_session["Low"].min()), float(bar.low))
+        stop_reference = min(float(df_session["low"].min()), float(bar.low))
     stop_level = round(stop_reference - settings.ORB_STOP_OFFSET, 2)
 
     # --- Phase 6: fire alarm and generate order ---------------------------------------------

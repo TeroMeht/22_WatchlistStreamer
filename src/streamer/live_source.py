@@ -51,7 +51,7 @@ class LiveSource(ABC):
 
     @abstractmethod
     async def run(
-        self, valid_tickers: list, last_atr_dict: dict, last_prev_close_dict: dict,
+        self, valid_tickers: list, session_store,
     ) -> None:
         """Feed bars until cancelled (live) or exhausted (replay)."""
 
@@ -71,14 +71,12 @@ class IBLiveSource(LiveSource):
     def __init__(self, source: IBSource):
         self._realtime = IBRealtimeSource(source)
 
-    async def run(self, valid_tickers, last_atr_dict, last_prev_close_dict):
+    async def run(self, valid_tickers, session_store):
         logger.info("Starting live monitoring...")
         candle_store = CandleStore()
 
         async def on_bar(bar: IncomingBar, symbol: str) -> None:
-            atr        = last_atr_dict.get(symbol)
-            prev_close = last_prev_close_dict.get(symbol)
-            await process_bar(candle_store, atr, prev_close, symbol, bar)
+            await process_bar(candle_store, session_store, symbol, bar)
 
         await self._realtime.subscribe(list(valid_tickers), on_bar)
 
@@ -90,13 +88,13 @@ class IBLiveSource(LiveSource):
 
 class ReplayLiveSource(LiveSource):
 
-    async def run(self, valid_tickers, last_atr_dict, last_prev_close_dict):
+    async def run(self, valid_tickers, session_store):
         logger.info(
             "Starting replay mode (speed=%s, data_dir=%s)...",
             settings.REPLAY_SPEED, settings.REPLAY_DATA_DIR,
         )
         candle_store = CandleStore()
-        await replay.run_replay(candle_store, last_atr_dict, last_prev_close_dict, valid_tickers)
+        await replay.run_replay(candle_store, session_store, valid_tickers)
 
 
 # =============================================================================

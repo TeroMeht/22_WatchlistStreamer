@@ -17,7 +17,7 @@ class Settings(IBSourceConfig, BaseSettings):
 
     # --- Runtime mode ---
     MODE: str
-
+    IB_CLIENT_ID: int
     # --- Replay-only settings (ignored in live mode) ---
     REPLAY_DATABASE_URL: str
     REPLAY_DATA_DIR: Path

@@ -1,4 +1,3 @@
-from src.common.calculate import *
 import pandas as pd
 import logging
 from typing import Optional, List,Dict
@@ -12,10 +11,19 @@ from dataclasses import asdict
 from zoneinfo import ZoneInfo
 
 from src.core.config import settings
-
-
 from data_sources._bar import IncomingBar
 
+from indicators.rvol import avg_volume_model
+from indicators.vwap import vwap_series
+from indicators.ema import ema_series
+from indicators.atr import atr_series
+from indicators.relatr import relatr_series
+from indicators.day_atr_ext import day_atr_ext_series
+
+
+from dataclasses import asdict
+from src.helpers.handle_candles import CandleRow
+from src.streamer.session_state import SymbolSessionState
 
 def intraday_datapipe(bars: List[IncomingBar]) -> pd.DataFrame:
     """
@@ -34,8 +42,8 @@ def intraday_datapipe(bars: List[IncomingBar]) -> pd.DataFrame:
     df["date"] = df["date"].dt.tz_convert(ZoneInfo(time_zone))  # convert to Helsinki coming from project config
 
     # --- Split Date / Time for readability ---
-    df["Date"] = df["date"].dt.date      # keep only date part
-    df["Time"] = df["date"].dt.time      # optional: separate Time column
+    df["date"] = df["date"].dt.date      # keep only date part
+    df["time"] = df["date"].dt.time      # optional: separate Time column
 
     # Drop original 'date' column if you want
     df = df.drop(columns=["date"])
@@ -69,16 +77,16 @@ def handle_incoming_dataframe_daily(bars: List[IncomingBar], symbol:str)-> pd.Da
 
     df = daily_datapipe(incoming_bars)
     
-    df['Symbol'] = symbol
+    df['symbol'] = symbol
 
 
     # Calculate ATR (assumes this function adds Prev_Close, TR, ATR columns)
-    df = calculate_14day_atr_df(df)
+    df = atr_series(df)
 
     # --- Reorder columns ---
     desired_order = [
-        "Symbol","Date", "Open", "High", "Low", "Close", "Volume",
-        "Average", "BarCount", "Prev_Close", "TR", "ATR"
+        "symbol","date", "open", "high", "low", "close", "volume",
+        "Average", "BarCount", "prev_close", "tr", "atr"
     ]
     # Keep only columns that exist (some may be missing)
     df = df[[col for col in desired_order if col in df.columns]]
@@ -87,16 +95,7 @@ def handle_incoming_dataframe_daily(bars: List[IncomingBar], symbol:str)-> pd.Da
     return df
 
 def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:str)-> pd.DataFrame:
-    """
-    LEGACY -- combined today/past split used by the Polygon warmup path.
 
-    Kept because Polygon still fetches a single window that contains BOTH
-    the past 5 days AND today's session-so-far, so it needs the internal
-    split. IB now fetches those two windows separately (see
-    ``bars_to_today_frame`` + ``bars_to_avg_volume_frame`` below and the
-    three-way call in ``datastreamer._fetch_history_data``); drop this
-    function once the Polygon path is refactored to match.
-    """
     # Step 1: Convert to dataclasses
     incoming_bars = IncomingBar.from_raw_bars(bars)
 
@@ -104,33 +103,29 @@ def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:s
     df = intraday_datapipe(incoming_bars)
 
     # Step 4: Assign symbol
-    df["Symbol"] = symbol
+    df["symbol"] = symbol
             # Step 4: Ensure Date column is datetime
-    df["Date"] = pd.to_datetime(df["Date"]).dt.date
+    df["date"] = pd.to_datetime(df["date"]).dt.date
 
-    # Step 5: Split today vs past
-    # In replay mode "today" is the replay date (from the CSVs), not
-    # the wall-clock date -- otherwise the replay-day's premarket bars
-    # would end up bucketed into `df_past` and pollute the Rvol model.
-    # Local import to avoid a cycle (streamer -> helpers -> streamer).
+
     from src.streamer.replay import get_effective_today
     today = get_effective_today()
 
-    df_today = df[df["Date"] == today].copy()
-    df_past = df[df["Date"] != today].copy()
+    df_today = df[df["date"] == today].copy()
+    df_past = df[df["date"] != today].copy()
     # Keep only rows with time >= 11:00
-    df_today = df_today[df_today["Time"] >= time(11, 0)]
+    df_today = df_today[df_today["time"] >= time(11, 0)]
 
 
-    df_past = df_past[["Symbol","Date","Time","Open","High","Low","Close","Volume"]]
+    df_past = df_past[["symbol","date","time","open","high","low","close","volume"]]
 
     # Step 5: Calculate average volume model
-    df_past = calculate_avg_volume_model([df_past])
-    df_today = calculate_vwap(df_today)
-    df_today = calculate_ema(df_today, period=9)
+    df_past = avg_volume_model([df_past])
+    df_today = vwap_series(df_today)
+    df_today = ema_series(df_today)
 
     df_today = df_today[[
-        "Symbol","Date","Time","Open","High","Low","Close","Volume","VWAP","EMA9"
+        "symbol","date","time","open","high","low","close","volume","vwap","ema9"
     ]]
     return df_today,df_past
 
@@ -142,141 +137,128 @@ def handle_incoming_dataframe_intradays_volume(bars: List[IncomingBar], symbol:s
 
 
 def bars_to_today_frame(bars: List[IncomingBar], symbol: str) -> pd.DataFrame:
-    """
-    Today's 2-min bars -> today_df with VWAP + EMA9 seeded.
 
-    Consumer of the ``fetch_intraday_live`` fetch: bars are already
-    scoped to the current session (session-start ... now, or session-
-    start ... replay-start), so there's no need to split today vs past
-    inside this function.
-
-    Applies the >= 11:00 Helsinki filter to match the legacy behavior.
-    Returns the same column set the old
-    ``handle_incoming_dataframe_intradays_volume`` produced for its
-    today half, so downstream ``handle_intraday_rvol_dataset`` keeps
-    working unchanged.
-    """
     incoming_bars = IncomingBar.from_raw_bars(bars)
     df = intraday_datapipe(incoming_bars)
-    df["Symbol"] = symbol
-    df["Date"] = pd.to_datetime(df["Date"]).dt.date
+    df["symbol"] = symbol
+    df["date"] = pd.to_datetime(df["date"]).dt.date
 
-    df = df[df["Time"] >= time(11, 0)]
+    df = df[df["time"] >= time(11, 0)]
 
-    df = calculate_vwap(df)
-    df = calculate_ema(df, period=9)
+    df = vwap_series(df)
+    df = ema_series(df)
 
     return df[[
-        "Symbol", "Date", "Time", "Open", "High", "Low",
-        "Close", "Volume", "VWAP", "EMA9",
+        "symbol", "date", "time", "open", "high", "low",
+        "close", "volume", "vwap", "ema9",
     ]]
 
 
 def bars_to_avg_volume_frame(bars: List[IncomingBar], symbol: str) -> pd.DataFrame:
-    """
-    Past N sessions of 2-min bars -> past_df with the Avg_volume baseline
-    applied (winsorized -- see ``calculate.calculate_avg_volume_model``).
 
-    Consumer of the ``fetch_intraday_history`` fetch: bars end BEFORE the
-    live/replay session start, so no today/past split is needed here.
-    Returns the same column set the old
-    ``handle_incoming_dataframe_intradays_volume`` produced for its past
-    half, so downstream ``handle_intraday_rvol_dataset`` keeps working
-    unchanged.
-    """
     incoming_bars = IncomingBar.from_raw_bars(bars)
     df = intraday_datapipe(incoming_bars)
-    df["Symbol"] = symbol
-    df["Date"] = pd.to_datetime(df["Date"]).dt.date
+    df["symbol"] = symbol
+    df["date"] = pd.to_datetime(df["date"]).dt.date
 
-    df = df[["Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume"]]
+    df = df[["symbol", "date", "time", "open", "high", "low", "close", "volume"]]
 
-    return calculate_avg_volume_model([df])
+    return avg_volume_model([df])
 
 
 
 def build_last_atr_dict(daily_with_atr: Dict[str, pd.DataFrame]) -> Dict[str, float]:
     """Latest ATR per symbol from the daily-bars dict keyed by Symbol."""
-    return {symbol: df['ATR'].iloc[-1] for symbol, df in daily_with_atr.items()}
+    return {symbol: df['atr'].iloc[-1] for symbol, df in daily_with_atr.items()}
 
 
 def build_last_prev_close_dict(daily_with_atr: Dict[str, pd.DataFrame]) -> Dict[str, float]:
-    """
-    Yesterday's close per symbol -- the last row of the daily frame.
 
-    The daily fetch window ends at yesterday 23:59:59 (see
-    ``warmup_source._window_ends``), so the last row IS yesterday's
-    session close, not the day-before-yesterday's. Used to anchor
-    ``DayAtrExt`` (the day-level ATR extension metric that captures
-    pre/after-market gaps in addition to the intraday move).
-    """
-    return {symbol: float(df['Close'].iloc[-1]) for symbol, df in daily_with_atr.items()}
+    return {symbol: float(df['close'].iloc[-1]) for symbol, df in daily_with_atr.items()}
+# ---------------------------------------------------------------------------
+# Warmup enrichment via SessionStore.apply_bar
+#
+# Replaces the two prior batch functions (handle_intraday_rvol_dataset +
+# handle_Atr_intraday_dataset) with one walk-per-symbol that mirrors
+# the live path: same ``apply_bar`` code produces the primed bars at
+# boot AND enriches each incoming bar at runtime. Any drift between
+# warmup and live is therefore impossible -- there is only one code
+# path.
+# ---------------------------------------------------------------------------
 
-def handle_Atr_intraday_dataset(
-    intraday_results: dict[str, pd.DataFrame],
-    daily_with_atr: dict[str, pd.DataFrame],
-) -> tuple[dict[str, pd.DataFrame], dict[str, float], dict[str, float]]:
 
-    relatr_datasets = {}
+def seed_and_enrich_intraday(
+    store,                                  # src.streamer.session_state.SessionStore
+    today_intra:  dict[str, pd.DataFrame],
+    past_intra:   dict[str, pd.DataFrame],
+    last_atr_per_symbol:        dict[str, float],
+    last_prev_close_per_symbol: dict[str, float],
+) -> dict[str, pd.DataFrame]:
 
-    # Build last ATR + yesterday's-close dictionaries (both keyed by Symbol).
-    last_atr_per_symbol        = build_last_atr_dict(daily_with_atr)
-    last_prev_close_per_symbol = build_last_prev_close_dict(daily_with_atr)
 
-    # Desired column order
+
+
     cols_order = [
-        'Symbol', 'Date', 'Time', 'Open', 'High', 'Low', 'Close',
-        'Volume', 'VWAP', 'EMA9', 'Avg_volume', 'Rvol', 'Relatr', 'DayAtrExt'
+        'symbol', 'date', 'time', 'open', 'high', 'low', 'close',
+        'volume', 'vwap', 'ema9', 'avg_volume', 'rvol', 'relatr', 'day_atr_ext'
     ]
 
-    # Upstream validate_tickers guarantees every frame here is non-empty.
-    for symbol, intraday_df in intraday_results.items():
-        # Intraday-VWAP extension (existing) + day-level extension from
-        # yesterday's close (new -- catches pre/after-market gaps).
-        intraday_df = calculate_relatr(intraday_df, last_atr_per_symbol)
-        intraday_df = calculate_day_atr_ext(
-            intraday_df, last_atr_per_symbol, last_prev_close_per_symbol,
-        )
+    enriched: dict[str, pd.DataFrame] = {}
 
-        # Reorder columns
-        intraday_df = intraday_df[cols_order]
+    for symbol, today_df in today_intra.items():
+        # Session date = earliest bar's date in the frame (they're all
+        # the same day per warmup contract).
+        session_date = today_df['date'].iloc[0] if not today_df.empty else None
+        st: SymbolSessionState = store.init(symbol, session_date)
+        st.atr        = last_atr_per_symbol.get(symbol)
+        st.prev_close = last_prev_close_per_symbol.get(symbol)
 
-        relatr_datasets[symbol] = intraday_df
-        logger.debug(f"{symbol} - last 10 rows:\n{intraday_df.tail(10)}")
+        past_df = past_intra.get(symbol)
+        if past_df is not None and not past_df.empty:
+            st.rvol_baseline = dict(zip(past_df['time'], past_df['avg_volume']))
+        else:
+            st.rvol_baseline = {}
 
-    return relatr_datasets, last_atr_per_symbol, last_prev_close_per_symbol
+        rows_out = []
+        for _, r in today_df.iterrows():
+            candle = CandleRow(
+                symbol      = symbol,
+                date        = r['date'],
+                time        = r['time'],
+                open        = float(r['open']),
+                high        = float(r['high']),
+                low         = float(r['low']),
+                close       = float(r['close']),
+                volume      = float(r['volume']),
+                vwap        = None,
+                ema9        = None,
+                avg_volume  = None,
+                rvol        = None,
+                relatr      = None,
+                day_atr_ext = None,
+            )
+            st.apply_bar(candle)
+            d = asdict(candle)
+            # Map 22 candle-field names -> DB column names.
+            rows_out.append({
+                'symbol':     d['symbol'],
+                'date':       d['date'],
+                'time':       d['time'],
+                'open':       d['open'],
+                'high':       d['high'],
+                'low':        d['low'],
+                'close':      d['close'],
+                'volume':     d['volume'],
+                'vwap':       d['vwap'],
+                'ema9':       d['ema9'],
+                'avg_volume': d['avg_volume'],
+                'rvol':       d['rvol'],
+                'relatr':     d['relatr'],
+                'day_atr_ext':  d['day_atr_ext'],
+            })
 
-def handle_intraday_rvol_dataset(
-    today_intra: dict[str, pd.DataFrame],
-    past_intra:  dict[str, pd.DataFrame],
-) -> dict[str, pd.DataFrame]:
-    """
-    Join today's 2-min intraday frame against the 5-day average-volume
-    frame per symbol and compute Rvol. Both inputs are dicts keyed by
-    Symbol -- upstream ``validate_tickers`` guarantees the same key set
-    in both, so we just iterate one of them.
-    """
-    required_cols = ['Symbol', 'Time', 'Avg_volume']
-    rvol_datasets = {}
+        out_df = pd.DataFrame(rows_out, columns=cols_order)
+        enriched[symbol] = out_df
+        logger.debug(f"{symbol} - last 10 rows:\n{out_df.tail(10)}")
 
-    for symbol, intraday_df in today_intra.items():
-        avg_volume_df = past_intra[symbol]
-        missing = [c for c in required_cols if c not in avg_volume_df.columns]
-        if missing:
-            logger.error(f"Avg volume DataFrame for {symbol} missing columns: {missing}")
-            continue
-
-        merged_df = pd.merge(
-            intraday_df,
-            avg_volume_df[required_cols],
-            on=['Symbol', 'Time'],
-            how='left',
-        )
-        merged_df = calculate_rvol(merged_df)
-
-        rvol_datasets[symbol] = merged_df
-        logger.debug(f"{symbol} - last 10 rows with Rvol:\n{merged_df.tail(10)}")
-
-    return rvol_datasets
-
-
+    return enriched

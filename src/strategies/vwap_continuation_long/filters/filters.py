@@ -27,9 +27,9 @@ class FilterResult(NamedTuple):
 
 def check_rvol_gte(df_all: pd.DataFrame, threshold: float) -> FilterResult:
 
-    label = f"Rvol"
+    label = f"rvol"
 
-    rvol = float(df_all.iloc[-1]["Rvol"])
+    rvol = float(df_all.iloc[-1]["rvol"])
     return FilterResult(
         id="rvol",
         label=label,
@@ -50,9 +50,9 @@ def _find_last_euforia_index(relatrs: List[float], euforic_threshold: float) -> 
 def check_prior_euforia(df_all: pd.DataFrame) -> FilterResult:
 
     threshold = float(settings.EUFORIC_THRESHOLD)
-    label = f"Relatr"
+    label = f"relatr"
 
-    relatrs = df_all["Relatr"].astype(float).tolist()
+    relatrs = df_all["relatr"].astype(float).tolist()
     min_relatr = min(relatrs)
     return FilterResult(
         id="prior_euforia",
@@ -68,7 +68,7 @@ def check_vwap_touch_since_euforia(
 
     label = f"back to VWAP"
 
-    relatrs = df_all["Relatr"].astype(float).tolist()
+    relatrs = df_all["relatr"].astype(float).tolist()
     threshold = float(settings.EUFORIC_THRESHOLD)
     idx = _find_last_euforia_index(relatrs, threshold)
     if idx is None:
@@ -115,9 +115,9 @@ def check_ema9_crossover_up(df_all: pd.DataFrame) -> FilterResult:
         return FilterResult("ema9_x_up", label, False, "crossover check errored")
 
     curr = tail.iloc[-1]
-    curr_close = float(curr["Close"])
-    curr_ema9 = float(curr["EMA9"])
-    curr_vwap = float(curr["VWAP"])
+    curr_close = float(curr["close"])
+    curr_ema9 = float(curr["ema9"])
+    curr_vwap = float(curr["vwap"])
     above_vwap = curr_close > curr_vwap
 
     passed = bool(crossed) and above_vwap

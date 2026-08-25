@@ -106,23 +106,23 @@ async def get_reference_from_opening_range(
     if df.empty:
         return None
 
-    or_df = df[df["Time"] <= or_end]
+    or_df = df[df["time"] <= or_end]
     if or_df.empty:
         return None
 
     # Wait for the range to be complete: the closing OR candle must be present.
-    if or_df["Time"].max() < or_end:
+    if or_df["time"].max() < or_end:
         return None
 
-    idx_max_high = or_df["High"].idxmax()
+    idx_max_high = or_df["high"].idxmax()
     source_row = or_df.loc[idx_max_high]
     first_row = or_df.iloc[0]
 
     return SimpleNamespace(
         symbol=symbol.upper(),
-        ref_time=source_row["Time"],           # timestamp of the max-high candle
-        ref_open=float(first_row["Open"]),     # OR-window opening price, for green-candle filter
-        ref_close=float(source_row["High"]),   # "level to watch" -- the OR high
-        ref_low=float(or_df["Low"].min()),
+        ref_time=source_row["time"],           # timestamp of the max-high candle
+        ref_open=float(first_row["open"]),     # OR-window opening price, for green-candle filter
+        ref_close=float(source_row["high"]),   # "level to watch" -- the OR high
+        ref_low=float(or_df["low"].min()),
         ref_field="high",
     )

@@ -142,11 +142,11 @@ async def send_alarm_to_fastapi(candle: CandleRow, alarm_message: str, fastapi_u
     In replay mode this is a no-op: payload is logged, no HTTP call.
     """
     payload = {
-        "Id": 0,
-        "Symbol": candle.symbol,
-        "Time": candle.time.isoformat(),
-        "Alarm": alarm_message,
-        "Date": candle.date.isoformat(),
+        "id": 0,
+        "symbol": candle.symbol,
+        "time": candle.time.isoformat(),
+        "alarm": alarm_message,
+        "date": candle.date.isoformat(),
     }
 
     # if settings.MODE == "replay":

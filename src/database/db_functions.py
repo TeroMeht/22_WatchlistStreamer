@@ -1,6 +1,5 @@
 import pandas as pd
 
-from src.common.calculate import *
 from src.helpers.handle_candles import *
 
 from datetime import date, datetime, time, timedelta
@@ -37,21 +36,21 @@ async def archive_livestream_tables() -> None:
         # livestream tables so INSERT ... SELECT is straightforward.
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS bars_2m_archive (
-                "Symbol" TEXT NOT NULL,
-                "Date" DATE NOT NULL,
-                "Time" TIME NOT NULL,
-                "Open" NUMERIC(10, 2),
-                "High" NUMERIC(10, 2),
-                "Low" NUMERIC(10, 2),
-                "Close" NUMERIC(10, 2),
-                "Volume" NUMERIC(18, 2),
-                "VWAP" NUMERIC(10, 2),
-                "EMA9" NUMERIC(10, 2),
-                "Avg_volume" NUMERIC(18, 2),
-                "Rvol" NUMERIC(10, 2),
-                "Relatr" NUMERIC(10, 2),
-                "DayAtrExt" NUMERIC(10, 2),
-                UNIQUE ("Symbol", "Date", "Time")
+                "symbol" TEXT NOT NULL,
+                "date" DATE NOT NULL,
+                "time" TIME NOT NULL,
+                "open" NUMERIC(10, 2),
+                "high" NUMERIC(10, 2),
+                "low" NUMERIC(10, 2),
+                "close" NUMERIC(10, 2),
+                "volume" NUMERIC(18, 2),
+                "vwap" NUMERIC(10, 2),
+                "ema9" NUMERIC(10, 2),
+                "avg_volume" NUMERIC(18, 2),
+                "rvol" NUMERIC(10, 2),
+                "relatr" NUMERIC(10, 2),
+                "day_atr_ext" NUMERIC(10, 2),
+                UNIQUE ("symbol", "date", "time")
             );
         """)
 
@@ -70,14 +69,14 @@ async def archive_livestream_tables() -> None:
             try:
                 result = await conn.execute(f"""
                     INSERT INTO bars_2m_archive (
-                        "Symbol", "Date", "Time", "Open", "High", "Low", "Close",
-                        "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr", "DayAtrExt"
+                        "symbol", "date", "time", "open", "high", "low", "close",
+                        "volume", "vwap", "ema9", "avg_volume", "rvol", "relatr", "day_atr_ext"
                     )
                     SELECT
-                        "Symbol", "Date", "Time", "Open", "High", "Low", "Close",
-                        "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr", "DayAtrExt"
+                        "symbol", "date", "time", "open", "high", "low", "close",
+                        "volume", "vwap", "ema9", "avg_volume", "rvol", "relatr", "day_atr_ext"
                     FROM "{tname}"
-                    ON CONFLICT ("Symbol", "Date", "Time") DO NOTHING;
+                    ON CONFLICT ("symbol", "date", "time") DO NOTHING;
                 """)
                 # asyncpg returns "INSERT 0 <count>"; last token is affected rows.
                 new_rows = int(result.split()[-1]) if result else 0
@@ -126,7 +125,7 @@ async def delete_all_tables_db_async() -> None:
             # Disable foreign key checks
             await conn.execute("SET session_replication_role = replica;")
 
-            # Drop tables containing _livestream or _volume_model
+            # Drop per-symbol livestream tables (recreated fresh each session)
             await conn.execute("""
                 DO $$
                 DECLARE
@@ -136,7 +135,7 @@ async def delete_all_tables_db_async() -> None:
                         SELECT tablename
                         FROM pg_tables
                         WHERE schemaname = 'public'
-                        AND (tablename LIKE '%_livestream%' OR tablename LIKE '%_volume_model%')
+                        AND tablename LIKE '%_livestream%'
                     LOOP
                         EXECUTE format('DROP TABLE IF EXISTS "%I" CASCADE;', t.tablename);
                     END LOOP;
@@ -153,7 +152,7 @@ async def delete_all_tables_db_async() -> None:
 
 async def create_and_fill_table_async(df: pd.DataFrame)-> None:
 
-    table_name = f"{df["Symbol"].iloc[0]}_livestream"
+    table_name = f"{df["symbol"].iloc[0]}_livestream"
 
     # Convert DataFrame to list of tuples.
     # Previously used df.iterrows(), which is notoriously slow because it
@@ -161,26 +160,26 @@ async def create_and_fill_table_async(df: pd.DataFrame)-> None:
     # and calling .itertuples(index=False, name=None) yields plain tuples
     # via numpy buffers -- typically 5-10x faster on multi-row frames and
     # produces tuples already in the right column order for the INSERT.
-    _cols = ["Symbol", "Date", "Time", "Open", "High", "Low", "Close",
-             "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr", "DayAtrExt"]
+    _cols = ["symbol", "date", "time", "open", "high", "low", "close",
+             "volume", "vwap", "ema9", "avg_volume", "rvol", "relatr", "day_atr_ext"]
     data = list(df[_cols].itertuples(index=False, name=None))
 
     create_table_sql = f"""
     CREATE TABLE IF NOT EXISTS {table_name} (
-        "Symbol" TEXT NOT NULL,
-        "Date" DATE NOT NULL,
-        "Time" TIME NOT NULL,
-        "Open" NUMERIC(10, 2),
-        "High" NUMERIC(10, 2),
-        "Low" NUMERIC(10, 2),
-        "Close" NUMERIC(10, 2),
-        "Volume" NUMERIC(18, 2),
-        "VWAP" NUMERIC(10, 2),
-        "EMA9" NUMERIC(10, 2),
-        "Avg_volume" NUMERIC(18, 2),
-        "Rvol" NUMERIC(10, 2),
-        "Relatr" NUMERIC(10, 2),
-        "DayAtrExt" NUMERIC(10, 2)
+        "symbol" TEXT NOT NULL,
+        "date" DATE NOT NULL,
+        "time" TIME NOT NULL,
+        "open" NUMERIC(10, 2),
+        "high" NUMERIC(10, 2),
+        "low" NUMERIC(10, 2),
+        "close" NUMERIC(10, 2),
+        "volume" NUMERIC(18, 2),
+        "vwap" NUMERIC(10, 2),
+        "ema9" NUMERIC(10, 2),
+        "avg_volume" NUMERIC(18, 2),
+        "rvol" NUMERIC(10, 2),
+        "relatr" NUMERIC(10, 2),
+        "day_atr_ext" NUMERIC(10, 2)
     );
     """
 
@@ -190,12 +189,12 @@ async def create_and_fill_table_async(df: pd.DataFrame)-> None:
     # Without this, both fall back to full table scans as the table grows.
     create_index_sql = f"""
     CREATE INDEX IF NOT EXISTS idx_{table_name}_sym_dt_tm
-        ON {table_name} ("Symbol", "Date", "Time");
+        ON {table_name} ("symbol", "date", "time");
     """
 
     insert_sql = f"""
     INSERT INTO {table_name}
-    ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Avg_volume", "Rvol", "Relatr", "DayAtrExt")
+    ("symbol", "date", "time", "open", "high", "low", "close", "volume", "vwap", "ema9", "avg_volume", "rvol", "relatr", "day_atr_ext")
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
     """
 
@@ -216,64 +215,6 @@ async def create_and_fill_table_async(df: pd.DataFrame)-> None:
 
     except Exception as e:
         logging.error(f"Error filling table '{table_name}': {e}")
-        raise
-
-    finally:
-        # CHANGED: release connection back to pool
-        if conn:
-            await pool.release(conn)
-
-
-async def create_and_fill_avg_volume_tables_async(df_list: list[pd.DataFrame]):
-
-    try:
-
-        pool = get_db_pool()
-        conn = await pool.acquire()
-
-        for df in df_list:
-            if df is None or df.empty:
-                continue
-
-            table_name = f"{df['Symbol'].iloc[0].lower()}_volume_model"
-            logging.info(f"Filling average volume table: {table_name}")
-
-            # Convert DataFrame to list of tuples -- vectorized.
-            # See note on iterrows() in create_and_fill_table_async above.
-            data = list(
-                df[["Symbol", "Time", "Avg_volume"]].itertuples(index=False, name=None)
-            )
-
-            create_table_sql = f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                "Symbol" TEXT NOT NULL,
-                "Time" TIME NOT NULL,
-                "Avg_volume" NUMERIC(18, 2)
-            );
-            """
-
-            # Index on (Symbol, Time) to accelerate fetch_avg_volume_for_candle,
-            # which is hit on every incoming candle.
-            create_index_sql = f"""
-            CREATE INDEX IF NOT EXISTS idx_{table_name}_sym_time
-                ON {table_name} ("Symbol", "Time");
-            """
-
-            insert_sql = f"""
-            INSERT INTO {table_name} ("Symbol", "Time", "Avg_volume")
-            VALUES ($1, $2, $3);
-            """
-
-            # Use transaction for safety
-            async with conn.transaction():
-                await conn.execute(create_table_sql)
-                await conn.execute(create_index_sql)
-                await conn.executemany(insert_sql, data)
-
-            logging.info(f"Inserted {len(data)} rows into '{table_name}'")
-
-    except Exception as e:
-        logging.error(f"Error inserting avg volumes: {e}")
         raise
 
     finally:
@@ -309,14 +250,14 @@ async def insert_candlestick_row(last_candle: CandleRow):
             last_candle.ema9,
             last_candle.avg_volume,
             last_candle.rvol,
-            last_candle.relatR,
+            last_candle.relatr,
             last_candle.day_atr_ext,
         )
 
         # --- Check if record already exists ---
         check_sql = f"""
         SELECT 1 FROM "{table_name}"
-        WHERE "Symbol"=$1 AND "Date"=$2 AND "Time"=$3
+        WHERE "symbol"=$1 AND "date"=$2 AND "time"=$3
         LIMIT 1;
         """
         exists = await conn.fetchrow(check_sql, last_candle.symbol, last_candle.date, last_candle.time)
@@ -327,7 +268,7 @@ async def insert_candlestick_row(last_candle: CandleRow):
         # --- Insert new record ---
         insert_sql = f"""
         INSERT INTO "{table_name}" 
-        ("Symbol", "Date", "Time", "Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9","Avg_volume", "Rvol","Relatr","DayAtrExt")
+        ("symbol", "date", "time", "open", "high", "low", "close", "volume", "vwap", "ema9","avg_volume", "rvol","relatr","day_atr_ext")
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14);
         """
         await conn.execute(insert_sql, *db_row)
@@ -355,18 +296,18 @@ async def insert_bulk_livestream(bars: list[dict]):
         # Create table if it doesn't exist
         create_table_query = """
         CREATE TABLE IF NOT EXISTS livedata (
-            "Symbol" TEXT NOT NULL,
-            "Date" DATE NOT NULL,
-            "Time" TIMESTAMP WITH TIME ZONE NOT NULL,
-            "Last" DOUBLE PRECISION,
-            "Volume" DOUBLE PRECISION
+            "symbol" TEXT NOT NULL,
+            "date" DATE NOT NULL,
+            "time" TIMESTAMP WITH TIME ZONE NOT NULL,
+            "last" DOUBLE PRECISION,
+            "volume" DOUBLE PRECISION
         );
         """
         await conn.execute(create_table_query)
 
         # Bulk insert
         insert_query = """
-            INSERT INTO livedata ("Symbol", "Date", "Time", "Last", "Volume")
+            INSERT INTO livedata ("symbol", "date", "time", "last", "volume")
             VALUES ($1, $2, $3, $4, $5)
         """
 
@@ -398,41 +339,6 @@ async def insert_bulk_livestream(bars: list[dict]):
             await pool.release(conn)
 
 
-async def fetch_avg_volume_for_candle(candle_row: CandleRow) -> float:
-    # Get database connection from pool
-    pool = get_db_pool()
-    conn = await pool.acquire()
-
-
-    try:
-        symbol = candle_row.symbol
-        time_val = candle_row.time
-        table_name = f"{symbol.lower()}_volume_model"
-
-        query = f"""
-            SELECT "Avg_volume"
-            FROM "{table_name}"
-            WHERE "Time" = $1
-            LIMIT 1;
-        """
-        row = await conn.fetchrow(query, time_val)
-
-        # Return 0.0 if row or column is missing, else convert to float
-        return float(row["Avg_volume"]) if row and row.get("Avg_volume") is not None else 0.0
-
-    except Exception as e:
-        logging.error(f"Error fetching avg volume for {symbol} at {time_val}: {e}")
-        return 0.0
-
-    finally:
-        # CHANGED: release connection back to pool
-        if conn:
-            await pool.release(conn)
-
-
-
-#-----------------Alarms handling----------------------------------------------------------------
-
 async def get_session_rows(table_name: str, day, since_time):
     """
     Fetch every row for ``table_name`` on ``day`` where ``Time >= since_time``.
@@ -446,8 +352,8 @@ async def get_session_rows(table_name: str, day, since_time):
     try:
         query = f"""
             SELECT * FROM "{table_name}"
-            WHERE "Date" = $1 AND "Time" >= $2
-            ORDER BY "Date" ASC, "Time" ASC;
+            WHERE "date" = $1 AND "time" >= $2
+            ORDER BY "date" ASC, "time" ASC;
         """
         rows = await conn.fetch(query, day, since_time)
 
@@ -456,7 +362,7 @@ async def get_session_rows(table_name: str, day, since_time):
 
         df = pd.DataFrame([dict(r) for r in rows])
         # Decimal -> float (matches get_last_rows)
-        numeric_cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr", "DayAtrExt"]
+        numeric_cols = ["open", "high", "low", "close", "volume", "vwap", "ema9", "relatr", "day_atr_ext"]
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = df[col].astype(float)
@@ -484,7 +390,7 @@ async def get_last_rows(table_name:str, num_rows:int):
             query = f"""
                 SELECT * 
                 FROM "{table_name}"
-                ORDER BY "Date" ASC, "Time" ASC;
+                ORDER BY "date" ASC, "time" ASC;
             """
             rows = await conn.fetch(query)
         else:
@@ -492,10 +398,10 @@ async def get_last_rows(table_name:str, num_rows:int):
             query = f"""
                 SELECT * FROM (
                     SELECT * FROM "{table_name}"
-                    ORDER BY "Date" DESC, "Time" DESC
+                    ORDER BY "date" DESC, "time" DESC
                     LIMIT $1
                 ) sub
-                ORDER BY "Date" ASC, "Time" ASC;
+                ORDER BY "date" ASC, "time" ASC;
             """
             rows = await conn.fetch(query, num_rows)
 
@@ -505,7 +411,7 @@ async def get_last_rows(table_name:str, num_rows:int):
         # Convert asyncpg records to DataFrame
         df = pd.DataFrame([dict(r) for r in rows])
                 # Convert numeric columns (which come as Decimal) to float
-        numeric_cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "EMA9", "Relatr", "DayAtrExt"]
+        numeric_cols = ["open", "high", "low", "close", "volume", "vwap", "ema9", "relatr", "day_atr_ext"]
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = df[col].astype(float)
@@ -533,7 +439,7 @@ async def get_livestream_row_at_time(
     table_name = f"{symbol.lower()}_livestream"
     query = f"""
         SELECT * FROM "{table_name}"
-        WHERE "Date" = $1 AND "Time" = $2
+        WHERE "date" = $1 AND "time" = $2
         LIMIT 1;
     """
     pool = get_db_pool()
@@ -566,11 +472,11 @@ async def create_alarms_table() -> None:
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS alarms (
-                "Id" SERIAL PRIMARY KEY,
-                "Symbol" TEXT NOT NULL,
-                "Time" TIME WITHOUT TIME ZONE NOT NULL,
-                "Alarm" TEXT NOT NULL,
-                "Date" DATE NOT NULL
+                "id" SERIAL PRIMARY KEY,
+                "symbol" TEXT NOT NULL,
+                "time" TIME WITHOUT TIME ZONE NOT NULL,
+                "alarm" TEXT NOT NULL,
+                "date" DATE NOT NULL
             );
             """
         )
@@ -584,7 +490,7 @@ async def insert_alarm(candle: CandleRow, alarm_message:str):
     try:
 
         insert_query = """
-            INSERT INTO alarms ("Symbol", "Time", "Alarm", "Date")
+            INSERT INTO alarms ("symbol", "time", "alarm", "date")
             VALUES ($1, $2, $3, $4);
         """
         await conn.execute(insert_query,
@@ -616,12 +522,12 @@ async def create_orders_table() -> None:
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS orders (
-                "Id" SERIAL PRIMARY KEY,
-                "Symbol" TEXT NOT NULL,
-                "Time" TIME WITHOUT TIME ZONE NOT NULL,
-                "Stop" NUMERIC(10, 2) NOT NULL,
-                "Date" DATE NOT NULL,
-                "Status" TEXT NOT NULL
+                "id" SERIAL PRIMARY KEY,
+                "symbol" TEXT NOT NULL,
+                "time" TIME WITHOUT TIME ZONE NOT NULL,
+                "stop" NUMERIC(10, 2) NOT NULL,
+                "date" DATE NOT NULL,
+                "status" TEXT NOT NULL
             );
             """
         )
@@ -670,18 +576,18 @@ async def insert_order(candle: CandleRow, stop_level: float):
         # Ensure orders table exists (with id)
         create_table_query = """
         CREATE TABLE IF NOT EXISTS orders (
-            "Id" BIGSERIAL PRIMARY KEY,
-            "Symbol" TEXT NOT NULL,
-            "Time" TIME NOT NULL,
-            "Stop" NUMERIC(10, 2) NOT NULL,
-            "Date" DATE NOT NULL,
-            "Status" TEXT NOT NULL
+            "id" BIGSERIAL PRIMARY KEY,
+            "symbol" TEXT NOT NULL,
+            "time" TIME NOT NULL,
+            "stop" NUMERIC(10, 2) NOT NULL,
+            "date" DATE NOT NULL,
+            "status" TEXT NOT NULL
         );
         """
         await conn.execute(create_table_query)
 
         insert_query = """
-            INSERT INTO orders ("Symbol", "Time", "Stop", "Date", "Status")
+            INSERT INTO orders ("symbol", "time", "stop", "date", "status")
             VALUES ($1, $2, $3, $4, $5);
         """
 
@@ -724,10 +630,10 @@ async def alarm_exists_recently(candle: CandleRow, alarm_message: str, cutoff_mi
         query = """
             SELECT 1
             FROM alarms
-            WHERE "Symbol" = $1
-              AND "Alarm" = $2
-              AND ("Date" > $3
-                   OR ("Date" = $4 AND "Time" >= $5))
+            WHERE "symbol" = $1
+              AND "alarm" = $2
+              AND ("date" > $3
+                   OR ("date" = $4 AND "time" >= $5))
             LIMIT 1;
         """
 

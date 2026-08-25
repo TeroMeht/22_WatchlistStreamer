@@ -12,7 +12,7 @@ async def trim_into_strength(candle: CandleRow):
     logger.info("Running trim into strength exit for symbol: %s", candle.symbol)
 
     # Check for euforia using the DataFrame
-    if candle.relatR < settings.EUFORIC_THRESHOLD:
+    if candle.relatr < settings.EUFORIC_THRESHOLD:
         logger.debug("Euforia detected for symbol: %s. Checking Relatr strength...", candle.symbol)
 
         await send_exit_request_to_fastapi(
@@ -27,7 +27,7 @@ async def trim_into_weakness(candle: CandleRow):
     logger.info("Running trim into weakness exit for symbol: %s", candle.symbol)
 
     # Check for capitulation using the DataFrame
-    if candle.relatR > settings.CAPITULATION_THRESHOLD:
+    if candle.relatr > settings.CAPITULATION_THRESHOLD:
         logger.debug("Capitulation detected for symbol: %s. Checking Relatr weakness...", candle.symbol)
 
         await send_exit_request_to_fastapi(
@@ -46,7 +46,7 @@ async def momentum_long_exit(candle: CandleRow):
 
     if is_crossover_down(df_all.tail(2)):
         last_row = df_all.iloc[-1]
-        logging.info(f"{last_row['Symbol']}: EMA9 crossover down detected")
+        logging.info(f"{last_row['symbol']}: EMA9 crossover down detected")
         # Check for euforia using the DataFrame
 
         if detect_euforia(df_all, threshold=settings.EUFORIC_THRESHOLD):
@@ -68,7 +68,7 @@ async def momentum_short_exit(candle: CandleRow):
 
     if is_crossover_up(df_all.tail(2)):
         last_row = df_all.iloc[-1]
-        logging.info(f"{last_row['Symbol']}: EMA9 crossover up detected")
+        logging.info(f"{last_row['symbol']}: EMA9 crossover up detected")
 
         # Check for capitulation using the DataFrame
         if detect_capitulation(df_all, threshold=settings.CAPITULATION_THRESHOLD):

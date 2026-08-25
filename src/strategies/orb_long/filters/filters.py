@@ -66,7 +66,7 @@ async def check_rvol_gte(df_last: pd.DataFrame, threshold: float) -> FilterResul
     label = f"Rvol >= {threshold:.2f}"
     if df_last.empty:
         return FilterResult("rvol", label, False, "no 2m candle in livestream yet")
-    rvol = float(df_last.iloc[-1]["Rvol"])
+    rvol = float(df_last.iloc[-1]["rvol"])
     return FilterResult(
         id="rvol",
         label=label,
@@ -121,11 +121,11 @@ async def check_premarket_high(df_last: pd.DataFrame, current_price: float) -> F
     if df_last.empty:
         return FilterResult("pm_high", label, False, "no 2m candle in livestream yet")
 
-    pre = df_last[df_last["Time"] < settings.SESSION_START]
+    pre = df_last[df_last["time"] < settings.SESSION_START]
     if pre.empty:
         return FilterResult("pm_high", label, False, "no premarket 2m candles yet")
 
-    premarket_high = float(pre["High"].max())
+    premarket_high = float(pre["high"].max())
     return FilterResult(
         id="pm_high",
         label=label,

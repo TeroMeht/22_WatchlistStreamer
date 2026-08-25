@@ -61,6 +61,6 @@ def warmup_from_daily(daily_data: dict) -> None:
         yrow = df.iloc[-1]
         orb_strategy_state.record_yesterday_daily(
             symbol=symbol,
-            high=float(yrow["High"]),
-            close=float(yrow["Close"]),
+            high=float(yrow["high"]),
+            close=float(yrow["close"]),
         )

@@ -324,7 +324,7 @@ def _discover_replays(valid_tickers: set[str]) -> dict[str, list[IncomingBar]]:
 
 
 async def _replay_symbol(
-    candle_store, atr, prev_close, symbol: str, bars: list[IncomingBar],
+    candle_store, session_store, symbol: str, bars: list[IncomingBar],
 ) -> None:
     """
     Drive one symbol's replay: for each bar, await ``process_bar`` (same
@@ -348,7 +348,7 @@ async def _replay_symbol(
         prev_ts = bar.date
 
         try:
-            await process_bar(candle_store, atr, prev_close, symbol, bar)
+            await process_bar(candle_store, session_store, symbol, bar)
         except Exception:
             logger.exception(
                 "[replay] process_bar failed for %s at %s", symbol, bar.date,
@@ -357,7 +357,7 @@ async def _replay_symbol(
     logger.info("[replay] finished %s (%d bars)", symbol, len(bars))
 
 
-async def run_replay(candle_store, last_atr_dict: dict, last_prev_close_dict: dict, valid_tickers: list) -> None:
+async def run_replay(candle_store, session_store, valid_tickers: list) -> None:
     """
     Replay-mode counterpart to ``run_streamer``. Discovers CSVs in
     ``REPLAY_DATA_DIR``, filters to the watchlist, then fans out one
@@ -378,13 +378,7 @@ async def run_replay(candle_store, last_atr_dict: dict, last_prev_close_dict: di
         settings.REPLAY_SPEED, sorted(replays),
     )
     await asyncio.gather(*[
-        _replay_symbol(
-            candle_store,
-            last_atr_dict.get(sym),
-            last_prev_close_dict.get(sym),
-            sym,
-            bars,
-        )
+        _replay_symbol(candle_store, session_store, sym, bars)
         for sym, bars in replays.items()
     ])
     logger.info("Replay complete.")

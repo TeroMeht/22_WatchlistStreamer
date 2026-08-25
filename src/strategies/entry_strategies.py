@@ -18,13 +18,13 @@ logger = logging.getLogger(__name__)
 
 async def reversal_strategy(candle: CandleRow):
 
-    logger.info("Running Reversal Long strategy for symbol: %s | RelATR: %.4f", candle.symbol, candle.relatR)
+    logger.info("Running Reversal Long strategy for symbol: %s | RelATR: %.4f", candle.symbol, candle.relatr)
 
     df_all = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
 
     if is_crossover_up(df_all.tail(2)):
         last_row = df_all.iloc[-1]
-        logging.info(f"{last_row['Symbol']}: EMA9 crossover up detected")
+        logging.info(f"{last_row['symbol']}: EMA9 crossover up detected")
 
         # Check for capitulation using the DataFrame
         if detect_capitulation(df_all, threshold=settings.CAPITULATION_THRESHOLD):
@@ -47,13 +47,13 @@ async def reversal_strategy(candle: CandleRow):
 
 async def reversal_short_strategy(candle: CandleRow):
 
-    logger.info("Running Reversal Short strategy for symbol: %s | RelATR: %.4f", candle.symbol, candle.relatR)
+    logger.info("Running Reversal Short strategy for symbol: %s | RelATR: %.4f", candle.symbol, candle.relatr)
 
     df_all = await get_last_rows(table_name=f"{candle.symbol.lower()}_livestream", num_rows=8)
 
     if is_crossover_down(df_all.tail(2)):
         last_row = df_all.iloc[-1]
-        logging.info(f"{last_row['Symbol']}: EMA9 crossover down detected")
+        logging.info(f"{last_row['symbol']}: EMA9 crossover down detected")
 
         # Check for euforia using the DataFrame
         if detect_euforia(df_all, threshold=settings.EUFORIC_THRESHOLD):
@@ -88,7 +88,7 @@ async def vwapcontinuation_short_strategy(candle: CandleRow):
 
             # Tarvii tarkastaa että onhan hinta ollut viimeaikoina VWAP yläpuolella
             last_5 = df_all.tail(5)
-            avg_relatr = last_5["Relatr"].mean()  # lasketaan viimeisimpien 5 candlejen relatr keskiarvo. Tämän etumerkin perusteella päätellään missä hinta on ollut
+            avg_relatr = last_5["relatr"].mean()  # lasketaan viimeisimpien 5 candlejen relatr keskiarvo. Tämän etumerkin perusteella päätellään missä hinta on ollut
 
 
             if avg_relatr > 0: # to the downside
@@ -105,4 +105,4 @@ async def vwapcontinuation_short_strategy(candle: CandleRow):
                     await generate_signal_alarm(candle=candle,
                                                 signal_name="VWAP continuation short setup")
     else:
-        logger.info("VWAP Continuation short strategy skipped for symbol: %s | RelATR: %.4f < %.4f", candle.symbol, candle.relatR, settings.RVOL_THRESHOLD)
+        logger.info("VWAP Continuation short strategy skipped for symbol: %s | RelATR: %.4f < %.4f", candle.symbol, candle.relatr, settings.RVOL_THRESHOLD)

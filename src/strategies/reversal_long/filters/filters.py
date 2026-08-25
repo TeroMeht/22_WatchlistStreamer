@@ -75,10 +75,10 @@ async def check_recent_capitulation(
     df = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=lookback)
     if df.empty or len(df) < 1:
         return FilterResult("recent_cap", label, False, f"no 2m candles yet (need last {lookback})")
-    if "Relatr" not in df.columns:
+    if "relatr" not in df.columns:
         return FilterResult("recent_cap", label, False, "Relatr column missing from livestream")
 
-    relatrs = df["Relatr"].astype(float)
+    relatrs = df["relatr"].astype(float)
     max_relatr = float(relatrs.max())
 
     return FilterResult(

@@ -11,17 +11,17 @@ def detect_stoplevel(df: pd.DataFrame, direction: str) -> float:
     if df.empty:
         raise ValueError("DataFrame is empty, cannot detect stop level")
 
-    required_cols = {"High", "Low"}
+    required_cols = {"high", "low"}
     if not required_cols.issubset(df.columns):
         raise KeyError(f"DataFrame must contain columns: {required_cols}")
 
     direction = direction.lower()
 
     if direction == "long":
-        reference_price = df["Low"].min()
+        reference_price = df["low"].min()
         stop_level = round(reference_price - settings.ORB_STOP_OFFSET, 2)
     elif direction == "short":
-        reference_price = df["High"].max()
+        reference_price = df["high"].max()
         stop_level = round(reference_price + settings.ORB_STOP_OFFSET, 2)
     else:
         raise ValueError(f"Unsupported direction: {direction}")

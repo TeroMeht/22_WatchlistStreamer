@@ -11,16 +11,15 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from src.database.db_functions import (
-    create_and_fill_avg_volume_tables_async,
-    create_and_fill_table_async,
-)
+from src.database.db_functions import create_and_fill_table_async
 from src.helpers.handle_dataframes import (
-    handle_Atr_intraday_dataset,
-    handle_intraday_rvol_dataset,
+    build_last_atr_dict,
+    build_last_prev_close_dict,
+    seed_and_enrich_intraday,
 )
 from src.strategies              import warmup
 from src.streamer.live_source    import LiveSource
+from src.streamer.session_state  import SessionStore
 from src.streamer.warmup_source  import WarmupSource
 
 
@@ -65,12 +64,32 @@ def _validate_tickers(
 # =============================================================================
 
 
-def _calculate_indicators(daily_data: list, today_intradaydata: list, past_intradaydata: list) -> tuple:
-    rvol_dataset = handle_intraday_rvol_dataset(today_intradaydata, past_intradaydata)
-    relatr_datasets, last_atr_dict, last_prev_close_dict = handle_Atr_intraday_dataset(
-        rvol_dataset, daily_data,
+def _seed_and_enrich(
+    daily_data:         dict,
+    today_intradaydata: dict,
+    past_intradaydata:  dict,
+) -> tuple[SessionStore, dict]:
+    """
+    Build the ``SessionStore``, seed per-symbol state from the daily +
+    baseline warmup data, walk today's already-occurred bars through
+    apply_bar, and return the store + the enriched-per-symbol frames
+    ready for DB persist.
+
+    Uses the SAME apply_bar path the live loop uses, so the primed
+    rows on disk and the streaming rows that follow are guaranteed
+    bit-identical.
+    """
+    store = SessionStore()
+    last_atr_dict        = build_last_atr_dict(daily_data)
+    last_prev_close_dict = build_last_prev_close_dict(daily_data)
+    enriched = seed_and_enrich_intraday(
+        store,
+        today_intradaydata,
+        past_intradaydata,
+        last_atr_dict,
+        last_prev_close_dict,
     )
-    return relatr_datasets, last_atr_dict, last_prev_close_dict
+    return store, enriched
 
 
 # =============================================================================
@@ -79,13 +98,11 @@ def _calculate_indicators(daily_data: list, today_intradaydata: list, past_intra
 
 
 async def _fill_database_tables_with_enriched_data(
-    relatr_datasets: dict,
-    past_intradaydata: dict,
+    enriched_by_symbol: dict,
 ) -> None:
 
     await asyncio.gather(
-        create_and_fill_avg_volume_tables_async(list(past_intradaydata.values())),
-        *(create_and_fill_table_async(df) for df in relatr_datasets.values()),
+        *(create_and_fill_table_async(df) for df in enriched_by_symbol.values()),
     )
 
 
@@ -109,15 +126,15 @@ async def data_pipe(warmup_source: WarmupSource, live_source: LiveSource, monito
         logging.error("No valid tickers found in all datasets. Aborting.")
         return
 
-    relatr_datasets, last_atr_dict, last_prev_close_dict = _calculate_indicators(
+    session_store, enriched = _seed_and_enrich(
         daily_data, today_intradaydata, past_intradaydata,
     )
 
-    await _fill_database_tables_with_enriched_data(relatr_datasets, past_intradaydata)
+    await _fill_database_tables_with_enriched_data(enriched)
 
     # Seed strategies' in-memory state from the enriched history. One-time.
-    warmup.warmup_from_intraday(relatr_datasets)
+    warmup.warmup_from_intraday(enriched)
     warmup.warmup_from_daily(daily_data)
 
     # Hand off to the live streamer (or CSV replay -- same interface).
-    await live_source.run(valid_tickers, last_atr_dict, last_prev_close_dict)
+    await live_source.run(valid_tickers, session_store)

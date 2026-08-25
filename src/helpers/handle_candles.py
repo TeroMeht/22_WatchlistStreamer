@@ -60,7 +60,7 @@ class CandleRow:
     ema9: float
     avg_volume: float
     rvol: float
-    relatR: float
+    relatr: float
     day_atr_ext: float
 
 
@@ -79,7 +79,7 @@ def enforce_candle_row_types(candle: CandleRow) -> CandleRow:
         ema9=float(candle.ema9),
         avg_volume=float(candle.avg_volume),
         rvol=float(candle.rvol),
-        relatR=float(candle.relatR),
+        relatr=float(candle.relatr),
         day_atr_ext=float(candle.day_atr_ext),
 
     )
@@ -88,7 +88,7 @@ def enforce_candle_row_types(candle: CandleRow) -> CandleRow:
 def stream_data_to_candle_row(symbol: str, bar: IncomingBar, bar_time_local: datetime) -> CandleRow:
     """
     Minimal CandleRow synthesized from a 5-sec bar. Indicator fields
-    (vwap/ema9/relatR/rvol/avg_volume) aren't meaningful for a 5-sec
+    (vwap/ema9/relatr/rvol/avg_volume) aren't meaningful for a 5-sec
     bar so we zero them; only symbol/date/time/close matter for the
     downstream alarm + order writers.
     """
@@ -106,6 +106,6 @@ def stream_data_to_candle_row(symbol: str, bar: IncomingBar, bar_time_local: dat
         ema9=0.0,
         avg_volume=0.0,
         rvol=0.0,
-        relatR=0.0,
+        relatr=0.0,
         day_atr_ext=0.0,
     )

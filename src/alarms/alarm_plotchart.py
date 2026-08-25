@@ -15,73 +15,73 @@ def plot_intraday_chart(df_intraday):
         vertical_spacing=0.02,
         row_heights=[0.6, 0.2, 0.2],
         subplot_titles=[
-            f"{df_intraday.iloc[-1]['Symbol']}, "
-            f"Time={df_intraday.iloc[-1]['Time']}"
+            f"{df_intraday.iloc[-1]['symbol']}, "
+            f"Time={df_intraday.iloc[-1]['time']}"
         ]
     )
 
     # Candlestick
     fig_intraday.add_trace(go.Candlestick(
-        x=df_intraday['Time'],
-        open=df_intraday['Open'],
-        high=df_intraday['High'],
-        low=df_intraday['Low'],
-        close=df_intraday['Close'],
+        x=df_intraday['time'],
+        open=df_intraday['open'],
+        high=df_intraday['high'],
+        low=df_intraday['low'],
+        close=df_intraday['close'],
         name='OHLC'
     ), row=1, col=1)
 
     # VWAP
-    if 'VWAP' in df_intraday.columns:
+    if 'vwap' in df_intraday.columns:
         fig_intraday.add_trace(go.Scatter(
-            x=df_intraday['Time'],
-            y=df_intraday['VWAP'],
+            x=df_intraday['time'],
+            y=df_intraday['vwap'],
             mode='lines',
             line=dict(color='red', width=2),
-            name='VWAP'
+            name='vwap'
         ), row=1, col=1)
 
     # EMA9
-    if 'EMA9' in df_intraday.columns:
+    if 'ema9' in df_intraday.columns:
         fig_intraday.add_trace(go.Scatter(
-            x=df_intraday['Time'],
-            y=df_intraday['EMA9'],
+            x=df_intraday['time'],
+            y=df_intraday['ema9'],
             mode='lines',
             line=dict(color='purple', width=1),
-            name='EMA9'
+            name='ema9'
         ), row=1, col=1)
 
     # Volume
     fig_intraday.add_trace(go.Bar(
-        x=df_intraday['Time'],
-        y=df_intraday['Volume'],
+        x=df_intraday['time'],
+        y=df_intraday['volume'],
         marker_color='blue',
-        name='Volume'
+        name='volume'
     ), row=2, col=1)
 
     # Relatr
-    if 'Relatr' in df_intraday.columns:
+    if 'relatr' in df_intraday.columns:
         fig_intraday.add_trace(go.Scatter(
-            x=df_intraday['Time'],
-            y=df_intraday['Relatr'],
+            x=df_intraday['time'],
+            y=df_intraday['relatr'],
             mode='lines',
             line=dict(color='green', width=2),
-            name='Relatr'
+            name='relatr'
         ), row=3, col=1)
 
         # Add horizontal lines
         for y_val in [0, 0.5, -0.5]:
             fig_intraday.add_shape(
                 type='line',
-                x0=df_intraday['Time'].min(),
-                x1=df_intraday['Time'].max(),
+                x0=df_intraday['time'].min(),
+                x1=df_intraday['time'].max(),
                 y0=y_val,
                 y1=y_val,
                 line=dict(color='black', width=1, dash='dash'),
                 xref='x3', yref='y3'
             )
                     # --- Annotate the latest value ---
-        latest_time = df_intraday['Time'].iloc[-1]
-        latest_value = df_intraday['Relatr'].iloc[-1]
+        latest_time = df_intraday['time'].iloc[-1]
+        latest_value = df_intraday['relatr'].iloc[-1]
 
         fig_intraday.add_annotation(
             x=latest_time,
@@ -100,10 +100,10 @@ def plot_intraday_chart(df_intraday):
         fig_intraday.update_layout(
             height=800,
             showlegend=False,
-            xaxis3=dict(title='Time'),
+            xaxis3=dict(title='time'),
             yaxis=dict(title='Price'),
-            yaxis2=dict(title='Volume'),
-            yaxis3=dict(title='Relatr'),
+            yaxis2=dict(title='volume'),
+            yaxis3=dict(title='relatr'),
             xaxis_rangeslider_visible=False,
         )
     

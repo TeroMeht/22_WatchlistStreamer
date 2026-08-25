@@ -25,7 +25,7 @@ Per-candle fields carried on the timeline:
     vwap              -- session VWAP as of this candle's close (nullable)
     ema9              -- 9-period EMA of Close as of this candle (nullable)
 
-VWAP / EMA9 are computed at finalize time in ``handle_incoming_candle``
+VWAP / EMA9 are computed at finalize time in ``SymbolSessionState.apply_bar``
 and land here through ``record_finalized_2min_candle``. The in-progress
 candle (built from 5-sec ticks) carries no vwap/ema9 -- the dashboard's
 line series just end at the last finalized candle.
@@ -187,7 +187,7 @@ def record_finalized_2min_candle(
     Append a completed 2-min OHLC candle. Idempotent for the tail row.
 
     ``vwap`` / ``ema9`` are the finalize-time indicator values (see
-    ``handle_incoming_candle``). They ride along on the candle dict so
+    ``SymbolSessionState.apply_bar``). They ride along on the candle dict so
     the dashboard can plot them as overlay line series without needing
     a second store.
     """
@@ -244,25 +244,25 @@ def seed_from_history(symbol: str, rows: list) -> None:
             except Exception:
                 return None
 
-        d = _get_field("Date")
-        t = _get_field("Time")
+        d = _get_field("date")
+        t = _get_field("time")
         candle_dt = datetime.combine(d, t)
         # Historical rows come from the livestream table (all-caps VWAP /
         # EMA9 columns). Older/alternate frames may use title-cased
         # ``Vwap`` / ``Ema9`` -- try both so seeding is robust to either.
-        vwap = _get_optional("VWAP")
+        vwap = _get_optional("vwap")
         if vwap is None:
             vwap = _get_optional("Vwap")
-        ema9 = _get_optional("EMA9")
+        ema9 = _get_optional("ema9")
         if ema9 is None:
             ema9 = _get_optional("Ema9")
         record_finalized_2min_candle(
             symbol=symbol,
             candle_dt=candle_dt,
-            open_=float(_get_field("Open")),
-            high=float(_get_field("High")),
-            low=float(_get_field("Low")),
-            close=float(_get_field("Close")),
+            open_=float(_get_field("open")),
+            high=float(_get_field("high")),
+            low=float(_get_field("low")),
+            close=float(_get_field("close")),
             vwap=vwap,
             ema9=ema9,
         )
