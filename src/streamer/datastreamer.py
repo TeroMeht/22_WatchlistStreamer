@@ -94,7 +94,7 @@ async def _fill_database_tables_with_enriched_data(
 
 async def data_pipe(warmup_source: WarmupSource, live_source: LiveSource, monitor_set:   dict) -> None:
 
-    tickers = monitor_set["tickers"]
+    tickers = sorted(monitor_set)
 
     # Fetch warmup DataFrames (daily / today-so-far / past 5 sessions).
     # The concrete source is hidden -- both branches return the same shape.

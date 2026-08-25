@@ -103,24 +103,23 @@ class IBWarmupSource(WarmupSource):
     async def fetch(self, tickers):
         daily_end, past_end, today_end = _window_ends()
 
+        # useRTH is locked in the IB adapter (DAILY -> True, intraday
+        # -> False), so it's not restated per-call here.
         daily_map, past_map, today_map = await asyncio.gather(
             self._historical.fetch_many(tickers, HistoryWindow(
                 bar_size      = BarSize.DAILY,
                 lookback_days = 14,
                 end           = daily_end,
-                use_rth       = True,
             )),
             self._historical.fetch_many(tickers, HistoryWindow(
                 bar_size      = BarSize.MIN_2,
                 lookback_days = 5,
                 end           = past_end,
-                use_rth       = False,
             )),
             self._historical.fetch_many(tickers, HistoryWindow(
                 bar_size      = BarSize.MIN_2,
                 lookback_days = 1,
                 end           = today_end,
-                use_rth       = False,
             )),
         )
         daily = _transform_bars_dict(daily_map, handle_incoming_dataframe_daily)

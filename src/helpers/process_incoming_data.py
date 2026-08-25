@@ -83,7 +83,7 @@ async def finalize_candle(last_candle,
     last_candle = await handle_incoming_candle(last_candle, atr_value)
 
     db_ready_candle = enforce_candle_row_types(last_candle)  # Ensure all floats
-    logger.info(f"Finalized candle for {symbol} at {last_candle.time}: O={last_candle.open}, H={last_candle.high}, L={last_candle.low}, C={last_candle.close}, V={last_candle.volume}, VWAP={last_candle.vwap}, EMA9={last_candle.ema9}, RelatR={last_candle.relatR}, AvgVol={last_candle.avg_volume}, RVol={last_candle.rvol}")
+    logger.debug(f"Finalized candle for {symbol} at {last_candle.time}: O={last_candle.open}, H={last_candle.high}, L={last_candle.low}, C={last_candle.close}, V={last_candle.volume}, VWAP={last_candle.vwap}, EMA9={last_candle.ema9}, RelatR={last_candle.relatR}, AvgVol={last_candle.avg_volume}, RVol={last_candle.rvol}")
     await insert_candlestick_row(db_ready_candle)
 
     # Push the finalized 2-min candle to the SHARED candle timeline once;

@@ -1,48 +1,3 @@
-"""
-Setup filters for the vwap_continuation_long strategy.
-
-Candle-driven (2-min): each filter reads the finalized rows in
-``{symbol}_livestream`` and returns a ``FilterResult`` in the shared
-shape used by ORB / reversal_long, so the dashboard's dynamic renderer
-treats these rows the same way.
-
-FilterResult contract (id/label/passed/detail): see
-``orb_long.filters.filters`` for the full field-by-field description.
-
-Setup story
------------
-
-We want to enter LONG on the SECOND leg of an upside move, after price
-has cooled off. The full journey the filters enforce is:
-
-    1. Earlier in the session, price extended above VWAP hard enough to
-       print ``Relatr <= EUFORIC_THRESHOLD`` on at least one 2-min
-       candle. That's ``prior_euforia``.
-
-    2. BETWEEN that euforia candle and the current candle, price has
-       come back to VWAP. "Back to VWAP" counts if some intermediate
-       candle sat inside ``[-VWAP_DISTANCE, +VWAP_DISTANCE]`` OR if
-       Relatr flipped from strictly positive to strictly negative
-       (price physically crossed UP through VWAP). That's
-       ``vwap_touch_since_euforia``.
-
-    3. On the current candle, we have volume: ``Rvol >=
-       RVOL_THRESHOLD``. That's ``rvol``.
-
-    4. On the current candle, EMA9 crossover UP: previous Close was
-       below the current EMA9 and current Close is above it. Same
-       predicate ``helpers.utils.is_crossover_up`` uses elsewhere so
-       "crossover" means the same thing across the codebase. That's
-       ``ema9_crossover_up`` -- the actual entry trigger.
-
-If all four pass on the same finalized 2-min candle, the strategy fires
-the alarm + entry order.
-
-``evaluate_filters`` returns ``(all_passed, results)``; ``format_summary``
-formats the results list for log lines. This module has no side effects
-beyond DB reads.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -71,14 +26,9 @@ class FilterResult(NamedTuple):
 
 
 def check_rvol_gte(df_all: pd.DataFrame, threshold: float) -> FilterResult:
-    """
-    Pass when the most recent 2-min candle has ``Rvol >= threshold``.
-    Reads the DataFrame tail rather than ``candle.rvol`` so the same
-    fetch feeds every filter here.
-    """
-    label = f"Rvol >= {threshold:.2f}"
-    if df_all.empty or "Rvol" not in df_all.columns:
-        return FilterResult("rvol", label, False, "no 2m candle in livestream yet")
+
+    label = f"Rvol"
+
     rvol = float(df_all.iloc[-1]["Rvol"])
     return FilterResult(
         id="rvol",
@@ -98,17 +48,9 @@ def _find_last_euforia_index(relatrs: List[float], euforic_threshold: float) -> 
 
 
 def check_prior_euforia(df_all: pd.DataFrame) -> FilterResult:
-    """
-    Pass when at least one 2-min candle in the session so far had
-    ``Relatr <= EUFORIC_THRESHOLD`` (a sufficiently strong extension
-    above VWAP, given ``Relatr = (VWAP - Close) / ATR`` so negative =
-    above VWAP).
-    """
-    threshold = float(settings.EUFORIC_THRESHOLD)
-    label = f"prior euforia (Relatr <= {threshold:.2f} in session)"
 
-    if df_all.empty or "Relatr" not in df_all.columns:
-        return FilterResult("prior_euforia", label, False, "no Relatr data yet")
+    threshold = float(settings.EUFORIC_THRESHOLD)
+    label = f"Relatr"
 
     relatrs = df_all["Relatr"].astype(float).tolist()
     min_relatr = min(relatrs)
@@ -123,36 +65,14 @@ def check_prior_euforia(df_all: pd.DataFrame) -> FilterResult:
 def check_vwap_touch_since_euforia(
     df_all: pd.DataFrame, vwap_distance: float,
 ) -> FilterResult:
-    """
-    Pass when, between the LAST euforia candle and the current candle,
-    price has actually come back to VWAP.
 
-    Two ways to qualify (either is enough):
-
-        IN-BAND  -- some intermediate candle had
-                    ``-vwap_distance <= Relatr <= +vwap_distance``.
-                    Direct sit on VWAP.
-        CROSS-UP -- some consecutive pair had ``prev > 0`` and
-                    ``curr < 0``, i.e. price physically crossed UP
-                    through VWAP given the Relatr sign convention.
-
-    Downward crosses (negative -> positive) do NOT count -- those move
-    price further below VWAP, opposite of what we want for a long
-    continuation.
-
-    Fails cleanly when there was no prior euforia (nothing to anchor
-    "since" against). Fails when the euforia is the tail row (no
-    subsequent candle yet).
-    """
-    label = f"back to VWAP since euforia (in +/-{vwap_distance:.2f} OR + to -)"
-    if df_all.empty or "Relatr" not in df_all.columns:
-        return FilterResult("vwap_touch_since_eu", label, False, "no Relatr data yet")
+    label = f"back to VWAP"
 
     relatrs = df_all["Relatr"].astype(float).tolist()
     threshold = float(settings.EUFORIC_THRESHOLD)
     idx = _find_last_euforia_index(relatrs, threshold)
     if idx is None:
-        return FilterResult("vwap_touch_since_eu", label, False, "no prior euforia to anchor from")
+        return FilterResult("vwap_touch_since_eu", label, False, "no prior euforia detected")
 
     since = relatrs[idx:]  # include the euforia candle itself as the anchor
     if len(since) < 2:
@@ -184,24 +104,8 @@ def check_vwap_touch_since_euforia(
 
 
 def check_ema9_crossover_up(df_all: pd.DataFrame) -> FilterResult:
-    """
-    Pass when the last two 2-min candles print an EMA9 crossover UP
-    AND the crossover happens above VWAP (current Close > current VWAP).
 
-    Same crossover predicate ``helpers.utils.is_crossover_up`` uses so
-    the "crossover" definition stays in lockstep with the reversal
-    strategies. The above-VWAP gate is the extra long-continuation
-    requirement: an EMA9 flip that prints while price is still below
-    VWAP is a different setup and should not fire this strategy.
-    """
-    label = "EMA9 crossover UP above VWAP (last 2 candles)"
-    if df_all.empty:
-        return FilterResult("ema9_x_up", label, False, "no 2m candles yet")
-    if len(df_all) < 2:
-        return FilterResult("ema9_x_up", label, False, "need at least 2 candles")
-    for col in ("Close", "EMA9", "VWAP"):
-        if col not in df_all.columns:
-            return FilterResult("ema9_x_up", label, False, f"{col} column missing")
+    label = "EMA9 crossover"
 
     tail = df_all.tail(2)
     try:
@@ -240,8 +144,8 @@ def format_summary(results: List[FilterResult]) -> str:
     """Compact one-line summary for log lines: PASS reasons or per-fail details."""
     failed = [r for r in results if not r.passed]
     if not failed:
-        return "filters PASS (" + "; ".join(f"{r.label}: {r.detail}" for r in results) + ")"
-    return "filter FAIL: " + "; ".join(f"{r.label} -> {r.detail}" for r in failed)
+        return "filters PASS (" + "; ".join(f"{r.detail}" for r in results) + ")"
+    return "filter FAIL: " + "; ".join(f"{r.detail}" for r in failed)
 
 
 async def evaluate_filters(symbol: str) -> Tuple[bool, List[FilterResult]]:

@@ -92,7 +92,7 @@ async def vwap_continuation_long_strategy(candle: CandleRow) -> None:
     # --- Phase 3: filter gate ----------------------------------------------
     if not filters_passed:
         logger.info(
-            "vwap_continuation_long: %s -- 2m candle %s close=%.2f | %s",
+            "vwap_continuation_long: %s at %s close=%.2f | %s",
             symbol, candle.time, float(candle.close), filters_summary,
         )
         return
@@ -104,7 +104,7 @@ async def vwap_continuation_long_strategy(candle: CandleRow) -> None:
     stop_level = detect_stoplevel(df_last, direction="long")
 
     logger.info(
-        "vwap_continuation_long: %s -- FIRE 2m candle %s close=%.2f stop=%.2f | %s",
+        "vwap_continuation_long: %s at %s close=%.2f stop=%.2f | %s",
         symbol, candle.time, float(candle.close), stop_level, filters_summary,
     )
 
