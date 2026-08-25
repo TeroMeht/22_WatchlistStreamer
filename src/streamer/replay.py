@@ -125,7 +125,7 @@ def get_effective_today() -> date:
 
     Used anywhere a pipeline step splits historical data into
     today-vs-past (e.g. the Rvol pre-session split in
-    ``handle_incoming_dataframe_intradays_volume``).
+    ``bars_to_today_frame`` / ``bars_to_avg_volume_frame``).
     """
     if settings.MODE == "replay":
         return get_replay_start_datetime().date()

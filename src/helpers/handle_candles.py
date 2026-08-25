@@ -46,22 +46,11 @@ class CandleStore:
         return minute_dt in self.minutes_processed[symbol]
 
 
-@dataclass
-class CandleRow:
-    symbol: str
-    date: date
-    time: time
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-    vwap: float
-    ema9: float
-    avg_volume: float
-    rvol: float
-    relatr: float
-    day_atr_ext: float
+# CandleRow moved to the shared ``indicators`` package. Re-exported here
+# so existing ``from src.helpers.handle_candles import CandleRow`` imports
+# keep working without touching every call site. Prefer the direct
+# ``from indicators.candle_row import CandleRow`` import in new code.
+from indicators.candle_row import CandleRow  # noqa: F401  (re-exported)
 
 
 def enforce_candle_row_types(candle: CandleRow) -> CandleRow:

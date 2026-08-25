@@ -1,48 +1,3 @@
-"""
-Polygon-backed warmup fetches -- drop-in replacements for the two IB
-history calls in ``src/helpers/ibclient.py`` when
-``settings.HISTORY_SOURCE == "polygon"``.
-
-Two functions, mirroring the IB signatures so ``_fetch_history_data``
-can dispatch on ``settings.HISTORY_SOURCE`` with a two-line branch:
-
-  * ``fetch_history_daily(client, symbol)``               -> pd.DataFrame | None
-  * ``fetch_intraday_volume_history(client, symbol)``     -> (today_df, past_df) | None
-
-The trick is that ``handle_incoming_dataframe_daily`` and
-``handle_incoming_dataframe_intradays_volume`` consume bars via
-``incoming_bars_to_datamodel_format``, which reads these attributes off
-each bar:
-
-    .date  .open  .high  .low  .close  .volume
-    getattr(bar, "average", None)
-    getattr(bar, "barCount", None)
-
-So we adapt each Polygon ``results[]`` entry (short keys ``t/o/h/l/c/v/vw/n``)
-into a ``SimpleNamespace`` carrying those exact attributes. Downstream
-handlers can't tell they weren't fed by ``ib_async.BarData``.
-
-Timezone rules:
-
-* Polygon ``t`` is **unix ms UTC**.
-* For DAILY bars, ``daily_datapipe`` does NOT tz-convert -- ``bar.date``
-  is written straight into a ``Date`` column. IB returns
-  ``datetime.date`` for daily bars, so we convert Polygon ``t`` to the
-  ET session date (Polygon's canonical day boundary) and pass a bare
-  ``datetime.date`` in ``.date``.
-* For INTRADAY bars, ``intraday_datapipe`` does
-  ``pd.to_datetime(df["date"], utc=True).dt.tz_convert(TIMEZONE)``.
-  A tz-aware UTC ``datetime`` in ``.date`` passes through cleanly and
-  ends up in Helsinki, matching what IB gives with ``formatDate=2``.
-
-Session anchor in replay mode:
-
-Both fetches end at the replay-session date (via
-``get_replay_start_datetime()``), NOT wall-clock now. Otherwise the
-Polygon fetches would pull bars from AFTER the replay window and
-pollute the RVOL / ATR warmup with future data. Mirrors the anchor
-logic already in ``ibclient.py``.
-"""
 
 from __future__ import annotations
 
@@ -56,8 +11,9 @@ import pandas as pd
 
 from src.core.config import settings
 from src.helpers.handle_dataframes import (
+    bars_to_avg_volume_frame,
+    bars_to_today_frame,
     handle_incoming_dataframe_daily,
-    handle_incoming_dataframe_intradays_volume,
 )
 from src.helpers.polygon_client import (
     PolygonClient,
@@ -133,7 +89,7 @@ def _polygon_intraday_to_barlike(row: dict) -> SimpleNamespace:
     Shape a Polygon N-min aggregate into what
     ``incoming_bars_to_datamodel_format`` expects.
 
-    ``date`` is a tz-aware UTC datetime -- ``intraday_datapipe`` then does
+    ``date`` is a tz-aware UTC datetime -- ``_intraday_frame`` (in handle_dataframes.py) then does
     ``pd.to_datetime(..., utc=True).dt.tz_convert(TIMEZONE)`` and derives
     the ``Date`` / ``Time`` columns in Helsinki. Same shape IB delivers
     with ``formatDate=2``.
@@ -262,6 +218,32 @@ async def fetch_intraday_volume_history(
             )
             return None
 
-    bars = [_polygon_intraday_to_barlike(r) for r in rows]
-    today_df, past_df = handle_incoming_dataframe_intradays_volume(bars, symbol)
+    # Split the combined window into today vs past based on the
+    # Helsinki-local session date, then hand each half to the same
+    # helpers the IB three-way fetch uses. The Polygon path stays
+    # one HTTP request (cheap) while the downstream shape matches
+    # IB's exactly -- ``warmup_source.PolygonWarmupSource`` and
+    # ``datastreamer.data_pipe`` don't know which provider fed them.
+    from src.streamer.replay import get_effective_today
+    today = get_effective_today()
+    hki = ZoneInfo(settings.TIMEZONE)
+
+    today_rows, past_rows = [], []
+    for r in rows:
+        ts_hki = datetime.fromtimestamp(r["t"] / 1000, tz=timezone.utc).astimezone(hki)
+        (today_rows if ts_hki.date() == today else past_rows).append(r)
+
+    today_bars = [_polygon_intraday_to_barlike(r) for r in today_rows]
+    past_bars  = [_polygon_intraday_to_barlike(r) for r in past_rows]
+
+    today_df = bars_to_today_frame(today_bars, symbol) if today_bars else None
+    past_df  = bars_to_avg_volume_frame(past_bars, symbol) if past_bars else None
+    if today_df is None or past_df is None:
+        logger.warning(
+            "[polygon] %s: split produced empty half (today=%s past=%s) -- skip",
+            symbol,
+            "empty" if today_df is None else f"{len(today_df)} rows",
+            "empty" if past_df  is None else f"{len(past_df)} rows",
+        )
+        return None
     return today_df, past_df

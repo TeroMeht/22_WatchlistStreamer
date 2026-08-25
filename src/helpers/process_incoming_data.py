@@ -28,7 +28,7 @@ from src.helpers.handle_candles import (
 from src.helpers.utils import get_2min_interval
 from src.strategies import candle_timeline
 from src.strategies.strategies import run_realtime_strategies, run_strategies
-from src.streamer.session_state import SessionStore
+from indicators.session_state import SessionStore
 
 logger = logging.getLogger(__name__)
 

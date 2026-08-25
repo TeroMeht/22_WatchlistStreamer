@@ -19,7 +19,7 @@ from src.helpers.handle_dataframes import (
 )
 from src.strategies              import warmup
 from src.streamer.live_source    import LiveSource
-from src.streamer.session_state  import SessionStore
+from indicators.session_state    import SessionStore
 from src.streamer.warmup_source  import WarmupSource
 
 
