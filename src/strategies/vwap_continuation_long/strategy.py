@@ -67,7 +67,7 @@ STOP_LOOKBACK_CANDLES: int = 5
 # =============================================================================
 
 
-async def vwap_continuation_long_strategy(candle: CandleRow) -> None:
+async def vwap_continuation_long(candle: CandleRow) -> None:
 
     symbol = candle.symbol
 

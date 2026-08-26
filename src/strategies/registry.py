@@ -1,11 +1,15 @@
 """
 Strategy registry.
 
-The single source of truth mapping strategy NAMES (as stored in the
-watchlist / exit_requests tables) to the async CALLABLES that implement
-them. Adding a new strategy = one import + one entry in the appropriate
-dict below. No other file needs to change (the dispatcher iterates these
-dicts).
+The single source of truth for the strategy CALLABLES the dispatcher
+knows about. Adding a strategy = one import + one append; no other
+file needs to change (the dispatcher iterates these lists).
+
+Each list holds bare function objects. The dispatcher identifies a
+strategy by ``fn.__name__``, which must match the strategy name stored
+in the watchlist / exit_requests tables. No more ``"name": fn`` dict --
+that mapping was hand-maintained on every add, and getting it wrong
+silently disabled a strategy.
 
 Three registries, keyed by cadence + role:
 
@@ -19,33 +23,40 @@ Three registries, keyed by cadence + role:
 
 from __future__ import annotations
 
-from src.strategies.entry_strategies import *
-from src.strategies.exit_strategies import *
-from src.strategies.orb_long.strategy import orb_breakout_long
-from src.strategies.reversal_long.strategy import reversal_long_strategy
-from src.strategies.vwap_continuation_long.strategy import vwap_continuation_long_strategy
+from src.strategies.entry_strategies import (
+    reversal_long,
+)
+from src.strategies.exit_strategies import (
+    endofday_exit,
+    momentum_long_exit,
+    momentum_short_exit,
+    trim_into_strength,
+    trim_into_weakness,
+    vwap_exit,
+)
+from src.strategies.orb_long.strategy import orb_breakout
+from src.strategies.orb_short.strategy import orb_breakdown
+from src.strategies.vwap_continuation_long.strategy import vwap_continuation_long
 
 
 # Candle-driven (2-min) entries. Callable: fn(candle) -> coroutine.
-ENTRY_STRATEGIES: dict = {
-    "reversal_long":            reversal_strategy,
-    #"reversal_short":           reversal_short_strategy,
-    #"vwap_continuation_short":  vwapcontinuation_short_strategy,
-    "vwap_continuation_long":   vwap_continuation_long_strategy,
-}
+ENTRY_STRATEGIES: list = [
+    reversal_long,
+    vwap_continuation_long,
+]
 
 # Candle-driven (2-min) exits. Callable: fn(candle) -> coroutine.
-EXIT_STRATEGIES: dict = {
-    "vwap_exit":           vwap_exit_strategy,
-    "momentum_long_exit":  momentum_long_exit,
-    "momentum_short_exit": momentum_short_exit,
-    "trim_into_strength":  trim_into_strength,
-    "trim_into_weakness":  trim_into_weakness,
-    "endofday_exit":       endofday_exit_strategy,
-}
+EXIT_STRATEGIES: list = [
+    vwap_exit,
+    momentum_long_exit,
+    momentum_short_exit,
+    trim_into_strength,
+    trim_into_weakness,
+    endofday_exit,
+]
 
 # Realtime (5-sec) entries. Callable: fn(bar, symbol) -> coroutine.
-REALTIME_ENTRY_STRATEGIES: dict = {
-   # "orb_breakout_long":        orb_breakout_long,
-   # "reversal_long_breakout":   reversal_long_strategy,
-}
+REALTIME_ENTRY_STRATEGIES: list = [
+    orb_breakout,
+    orb_breakdown,
+]

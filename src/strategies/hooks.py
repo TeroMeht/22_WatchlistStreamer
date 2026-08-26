@@ -51,7 +51,7 @@ def make_hooks(viz: ModuleType) -> SimpleNamespace:
         viz.record_5s_tick(
             symbol,
             bar_time_local,
-            float(bar.open_),
+            float(bar.open),
             float(bar.high),
             float(bar.low),
             float(bar.close),

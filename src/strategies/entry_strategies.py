@@ -13,10 +13,14 @@ logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Strategy implementations
+#
+# Note: every registered strategy's function NAME must match its
+# watchlist / exit-request key exactly -- the dispatcher matches by
+# ``fn.__name__`` (see ``registry.py`` / ``strategies.py``).
 # =============================================================================
 
 
-async def reversal_strategy(candle: CandleRow):
+async def reversal_long(candle: CandleRow):
 
     logger.info("Running Reversal Long strategy for symbol: %s | RelATR: %.4f", candle.symbol, candle.relatr)
 

@@ -10,12 +10,13 @@ Two entry points:
 
 * ``run_realtime_strategies(bar, symbol)`` -- called on every 5-sec bar
   from ``process_bar``. Fires the registered realtime entry strategies
-  (e.g. ORB breakout) which need sub-candle responsiveness because
-  waiting for the next 2-min close would be too slow.
+  (e.g. ORB breakout / breakdown) which need sub-candle responsiveness
+  because waiting for the next 2-min close would be too slow.
 
-Both are thin: cadence-specific input, look up the "allowed" set from
-``dispatcher_state``, iterate the matching registry, ``asyncio.gather``
-the results. Adding a strategy = one line in ``registry.py``, not here.
+Registries are plain lists of functions. A strategy is armed for a
+symbol when its ``fn.__name__`` appears in the watchlist / exit-request
+set for that symbol. Adding a strategy = one line in ``registry.py``,
+not here.
 
 Re-exports ``set_watchlist_strategies`` / ``get_watchlist_strategies``
 from ``dispatcher_state`` so existing callers of
@@ -46,14 +47,15 @@ logger = logging.getLogger(__name__)
 async def run_strategies(candle: CandleRow) -> None:
     """
     For each incoming 2-min candle: fire every armed entry + exit
-    strategy concurrently. Registry lookup replaces per-name branches.
+    strategy concurrently. Match strategies to the watchlist / exit
+    requests by ``fn.__name__``.
     """
     allowed_entries = get_watchlist_strategies_for(candle.symbol)
     armed_exits = await get_armed_exits_for(candle.symbol)
 
     coros = [
-        *(fn(candle) for name, fn in ENTRY_STRATEGIES.items() if name in allowed_entries),
-        *(fn(candle) for name, fn in EXIT_STRATEGIES.items() if name in armed_exits),
+        *(fn(candle) for fn in ENTRY_STRATEGIES if fn.__name__ in allowed_entries),
+        *(fn(candle) for fn in EXIT_STRATEGIES  if fn.__name__ in armed_exits),
     ]
     if coros:
         await asyncio.gather(*coros)
@@ -71,8 +73,8 @@ async def run_realtime_strategies(bar, symbol: str) -> None:
     allowed_entries = get_watchlist_strategies_for(symbol)
     coros = [
         fn(bar, symbol)
-        for name, fn in REALTIME_ENTRY_STRATEGIES.items()
-        if name in allowed_entries
+        for fn in REALTIME_ENTRY_STRATEGIES
+        if fn.__name__ in allowed_entries
     ]
     if coros:
         await asyncio.gather(*coros)

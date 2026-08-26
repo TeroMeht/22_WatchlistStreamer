@@ -1,5 +1,5 @@
 """
-ORB entry-strategy filters.
+ORB long entry-strategy filters.
 
 Each filter is a small async function that returns a ``FilterResult``:
 an ``(id, label, passed, detail)`` tuple. Filters are pure -- they only
@@ -12,18 +12,20 @@ strategy logs the outcome (via ``format_summary``) and hands the results
 list to the viz layer for dashboard rendering; this module has no side
 effects beyond DB reads.
 
-``FilterResult`` fields:
+Long-side gates (all must pass):
+    * price >= premarket high
+    * Rvol  >= settings.RVOL_THRESHOLD
+    * price >  yesterday's RTH high
+    * price >  yesterday's RTH close
 
+``FilterResult`` fields:
     id      -- stable identifier for the filter (e.g. ``"rvol"``). The
                dashboard uses this to keep a row across polls, so it
                must not change once shipped.
     label   -- human-readable rule statement WITH the live threshold
-               baked in (e.g. ``"Rvol >= 1.50"``). The dashboard renders
-               this as the row's left-hand label so a settings change
-               reaches the UI on the next poll with no code edit.
+               baked in (e.g. ``"Rvol >= 1.50"``).
     passed  -- did the filter pass on this evaluation?
-    detail  -- right-hand text on the dashboard row and the log fragment
-               (e.g. ``"Rvol = 2.10"``, ``"no 2m candle yet"``).
+    detail  -- right-hand text on the dashboard row and the log fragment.
 
 Signature contract for every filter:
     async def check_<name>(...) -> FilterResult
@@ -36,11 +38,12 @@ from __future__ import annotations
 
 import logging
 from typing import List, NamedTuple, Tuple
+
 import pandas as pd
+
 from src.core.config import settings
 from src.database.db_functions import get_last_rows
-
-from ..state import yesterday_close, yesterday_high
+from src.strategies.orb_shared.yesterday import yesterday_close, yesterday_high
 
 logger = logging.getLogger(__name__)
 
@@ -53,15 +56,14 @@ class FilterResult(NamedTuple):
 
 
 # =============================================================================
-# Individual filters
+# Individual filters (long direction)
 # =============================================================================
 
 
 async def check_rvol_gte(df_last: pd.DataFrame, threshold: float) -> FilterResult:
     """
     Pass when the most recent 2-min candle in ``{symbol}_livestream`` has
-    ``Rvol >= threshold``. Uses the latest row available -- historical
-    or live-finalized, whichever is most recent.
+    ``Rvol >= threshold``.
     """
     label = f"Rvol >= {threshold:.2f}"
     if df_last.empty:
@@ -76,11 +78,7 @@ async def check_rvol_gte(df_last: pd.DataFrame, threshold: float) -> FilterResul
 
 
 async def check_price_above_yesterday_high(symbol: str, current_price: float) -> FilterResult:
-    """
-    Pass when ``current_price > yesterday's RTH high``. Yesterday's high
-    is seeded once at streamer startup from the useRTH=True daily fetch,
-    so premarket is naturally excluded.
-    """
+    """Pass when ``current_price > yesterday's RTH high``."""
     label = "price > yesterday high"
     yhi = yesterday_high(symbol)
     if yhi is None:
@@ -94,10 +92,7 @@ async def check_price_above_yesterday_high(symbol: str, current_price: float) ->
 
 
 async def check_price_above_yesterday_close(symbol: str, current_price: float) -> FilterResult:
-    """
-    Pass when ``current_price > yesterday's RTH close``. Same seeding
-    contract as ``check_price_above_yesterday_high``.
-    """
+    """Pass when ``current_price > yesterday's RTH close``."""
     label = "price > yesterday close"
     ycl = yesterday_close(symbol)
     if ycl is None:
@@ -149,18 +144,17 @@ def format_summary(results: List[FilterResult]) -> str:
 
 async def evaluate_filters(symbol: str, current_price: float) -> Tuple[bool, List[FilterResult]]:
     """
-    Run every filter for ``symbol`` at ``current_price`` and return
-    ``(all_passed, results)``. ``results`` preserves the order the
-    filters are declared in below -- that's the render order on the
-    dashboard.
+    Run every long-side ORB filter for ``symbol`` at ``current_price``
+    and return ``(all_passed, results)``. Result order is the declaration
+    order below -- that's the render order on the dashboard.
     """
     df_last = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=None)
 
     results: List[FilterResult] = [
-        await check_premarket_high(df_last, current_price),
         await check_rvol_gte(df_last, settings.RVOL_THRESHOLD),
         await check_price_above_yesterday_high(symbol, current_price),
         await check_price_above_yesterday_close(symbol, current_price),
+        await check_premarket_high(df_last, current_price),
     ]
 
     return all(r.passed for r in results), results

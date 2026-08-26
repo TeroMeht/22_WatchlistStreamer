@@ -1,16 +1,16 @@
 """
-ORB long -- per-symbol overlay state for the dashboard.
+ORB short -- per-symbol overlay state for the dashboard.
 
-Owns only the pieces that are actually ORB-long specific:
-    * ``_latest_filters`` -- the last per-filter results from
-      ``filters.evaluate_filters`` for this symbol.
-    * ``snapshot()`` -- decorates the shared overlay/fires/candle-timeline
-      snapshot with ``yesterday_high``, ``yesterday_close``, and the
-      per-symbol ``filters`` list.
+Mirrors ``orb_long/visualization/state.py`` with two differences:
 
-Yesterday's daily OHLC lives in ``orb_shared.yesterday`` (shared with
-ORB short); the dashboard reads it from there so we don't keep two
-copies in sync.
+    * ``STRATEGY_KEY = "orb_short"`` so overlay/fires slices do not
+      collide with the long side in the shared store.
+    * The snapshot decorates each symbol with ``yesterday_low`` and
+      ``yesterday_close`` (short-side reference points) instead of
+      ``yesterday_high``.
+
+Yesterday's daily OHLC comes from ``orb_shared.yesterday`` so the two
+directions share the same cache.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from src.strategies import candle_timeline, overlay_state
 from src.strategies.orb_shared import yesterday
 
 
-STRATEGY_KEY: str = "orb"
+STRATEGY_KEY: str = "orb_short"
 
 
 # ---- Re-exports from the shared candle timeline -----------------------------
@@ -31,7 +31,7 @@ seed_from_history            = candle_timeline.seed_from_history
 
 
 # =============================================================================
-# ORB-long-specific per-symbol filter results
+# ORB-short-specific per-symbol filter results
 # =============================================================================
 
 
@@ -76,14 +76,14 @@ def record_fire(symbol, bar_dt, close, stop_level, ref_close) -> None:
 
 def snapshot() -> dict:
     """
-    ORB long dashboard snapshot: shared overlay/fires/candle-timeline
-    shape plus ``yesterday_high``, ``yesterday_close``, and the
-    per-symbol ``filters`` list.
+    ORB short dashboard snapshot: shared overlay/fires/candle-timeline
+    shape plus ``yesterday_low``, ``yesterday_close``, and the per-symbol
+    ``filters`` list.
     """
     return overlay_state.snapshot(
         STRATEGY_KEY,
         extra_symbol_fields=lambda sym: {
-            "yesterday_high":  yesterday.yesterday_high(sym),
+            "yesterday_low":   yesterday.yesterday_low(sym),
             "yesterday_close": yesterday.yesterday_close(sym),
             "filters":         _latest_filters.get(sym.upper(), []),
         },
