@@ -88,6 +88,7 @@ async def finalize_candle(
         high     = db_ready.high,
         low      = db_ready.low,
         close    = db_ready.close,
+        volume   = db_ready.volume,
         vwap     = db_ready.vwap,
         ema9     = db_ready.ema9,
     )
@@ -120,6 +121,7 @@ async def process_bar(
         high=bar.high,
         low=bar.low,
         close=bar.close,
+        volume=bar.volume,
     )
     await run_realtime_strategies(bar, symbol)
 

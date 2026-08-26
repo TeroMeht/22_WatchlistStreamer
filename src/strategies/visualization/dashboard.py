@@ -331,6 +331,20 @@ function baseCard(sym, strategyLabel, tagClass, infoHtml, checkHtml) {
     wickUpColor: '#3b6d11', wickDownColor: '#d85a30',
     priceFormat: {type: 'price', precision: 2, minMove: 0.01},
   });
+  // Volume histogram anchored to its own price scale so the bars sit
+  // as a compact strip at the bottom of the chart without stealing
+  // vertical space from the candles. Per-bar colour is set on each
+  // datapoint (green for up-close, red for down-close) so the volume
+  // history reads the same trend at a glance as the candles above.
+  const volumeSeries = chart.addHistogramSeries({
+    priceFormat: {type: 'volume'},
+    priceScaleId: 'volume',
+    lastValueVisible: false,
+    priceLineVisible: false,
+  });
+  chart.priceScale('volume').applyOptions({
+    scaleMargins: {top: 0.8, bottom: 0},
+  });
   // Indicator overlay series -- one line each for session VWAP and
   // EMA9. Both share the candles' right-hand price scale so scale
   // context stays 1:1. Values arrive per finalized 2-min candle; the
@@ -355,11 +369,13 @@ function baseCard(sym, strategyLabel, tagClass, infoHtml, checkHtml) {
   return {
     symbol: sym, element: el, chart: chart, series: series,
     vwapSeries: vwapSeries, ema9Series: ema9Series,
+    volumeSeries: volumeSeries,
     refLine: null, refLineKey: null,
     stopLine: null, stopLineKey: null,
     lastFireSig: null,
     lastBarTs: 0,
     lastVwapTs: 0, lastEma9Ts: 0,
+    lastVolTs: 0,
   };
 }
 
@@ -379,6 +395,42 @@ function updateChartCandles(card, sym) {
   }
   updateIndicatorSeries(card, candles, 'vwap',  card.vwapSeries,  'lastVwapTs');
   updateIndicatorSeries(card, candles, 'ema9',  card.ema9Series,  'lastEma9Ts');
+  updateVolumeSeries(card, candles);
+}
+
+// Volume histogram sync: mirrors ``updateChartCandles``' diff logic
+// (bulk setData on first paint, per-bar update after that) but colours
+// each bar by the candle's up/down direction so trend context matches
+// what's happening in the candles above. Candles with ``null`` volume
+// are skipped -- the in-progress candle only accumulates volume when
+// the streamer forwards it, and finalize replaces it with the DB value.
+function updateVolumeSeries(card, candles) {
+  if (!card.volumeSeries) return;
+  const upColor   = '#3b6d11';
+  const downColor = '#d85a30';
+  const point = (k) => ({
+    time: k.ts,
+    value: k.v,
+    color: (k.c >= k.o) ? upColor : downColor,
+  });
+  if (card.lastVolTs === 0) {
+    const seed = [];
+    for (const k of candles) {
+      if (k.v == null) continue;
+      seed.push(point(k));
+    }
+    if (seed.length) {
+      card.volumeSeries.setData(seed);
+      card.lastVolTs = seed[seed.length - 1].time;
+    }
+    return;
+  }
+  for (const k of candles) {
+    if (k.ts < card.lastVolTs) continue;
+    if (k.v == null) continue;
+    card.volumeSeries.update(point(k));
+    card.lastVolTs = k.ts;
+  }
 }
 
 // Push VWAP / EMA9 (or any nullable per-candle scalar) into a Lightweight

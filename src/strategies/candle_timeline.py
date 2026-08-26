@@ -22,6 +22,9 @@ Per-candle fields carried on the timeline:
 
     ts, t             -- unix + iso timestamp of the 2-min interval start
     o, h, l, c        -- OHLC
+    v                 -- volume (finalized: from the DB row / historical
+                          seed; in-progress: sum of the 5-sec bar volumes
+                          seen so far for this 2-min interval)
     vwap              -- session VWAP as of this candle's close (nullable)
     ema9              -- 9-period EMA of Close as of this candle (nullable)
 
@@ -29,6 +32,13 @@ VWAP / EMA9 are computed at finalize time in ``SymbolSessionState.apply_bar``
 and land here through ``record_finalized_2min_candle``. The in-progress
 candle (built from 5-sec ticks) carries no vwap/ema9 -- the dashboard's
 line series just end at the last finalized candle.
+
+Volume double-counting guard: ``record_5s_tick`` may be called more than
+once for the same 5-sec bar (``process_bar`` records unconditionally,
+and some strategies re-record from their hooks). ``last_tick_bar_dt``
+on the timeline dedupes those repeats -- OHLC is idempotent (last write
+wins), but volume MUST accumulate only once per bar or the histogram
+doubles.
 
 Readers exposed:
 
@@ -101,6 +111,11 @@ class CandleTimeline:
     last_bar_close: Optional[float] = None
     candles_2min: List[dict] = field(default_factory=list)
     current_candle: Optional[dict] = None
+    # Iso of the last 5-sec bar we accumulated volume for. Guards
+    # against double-counting when the same bar reaches
+    # ``record_5s_tick`` from more than one caller (see module
+    # docstring). ``None`` = no tick recorded yet this session.
+    last_tick_bar_dt: Optional[str] = None
 
 
 _timelines: dict[str, CandleTimeline] = {}
@@ -145,14 +160,27 @@ def record_5s_tick(
     high: float,
     low: float,
     close: float,
+    volume: Optional[float] = None,
 ) -> None:
-    """Update the CURRENT (in-progress) 2-min candle from one 5-sec bar."""
+    """
+    Update the CURRENT (in-progress) 2-min candle from one 5-sec bar.
+
+    ``volume`` (optional) is the 5-sec bar's volume; it accumulates into
+    the current 2-min candle's ``v`` field. Duplicate calls for the same
+    bar (identified by ``bar_dt``) are safe: OHLC is idempotent and the
+    volume add is skipped on repeats via ``last_tick_bar_dt``.
+    """
     tl = _get(symbol)
     interval = to_2min_interval(bar_dt)
     interval_ts = to_unix_local_as_utc(interval)
     interval_iso = interval.isoformat(timespec="seconds")
 
     o, h, l, c = float(open_), float(high), float(low), float(close)
+    bar_key = bar_dt.replace(tzinfo=None).isoformat(timespec="seconds")
+    # A repeat call for the same 5-sec bar (see module docstring):
+    # OHLC is last-write-wins, but volume must NOT accumulate again.
+    is_new_bar = (tl.last_tick_bar_dt != bar_key)
+    v = float(volume) if (volume is not None and is_new_bar) else 0.0
 
     cur = tl.current_candle
     if cur is None or cur["ts"] != interval_ts:
@@ -160,6 +188,10 @@ def record_5s_tick(
             "ts": interval_ts,
             "t": interval_iso,
             "o": o, "h": h, "l": l, "c": c,
+            # In-progress volume: seed with this bar's contribution (or 0
+            # if volume wasn't supplied). Finalize replaces it with the
+            # authoritative DB value via ``record_finalized_2min_candle``.
+            "v": v,
             # 5-sec bars carry no vwap / ema9 -- the dashboard just ends
             # its VWAP / EMA9 line series at the last finalized candle.
             "vwap": None, "ema9": None,
@@ -168,9 +200,12 @@ def record_5s_tick(
         cur["h"] = max(cur["h"], h)
         cur["l"] = min(cur["l"], l)
         cur["c"] = c
+        if is_new_bar:
+            cur["v"] = float(cur.get("v") or 0.0) + v
 
     tl.last_bar_time = bar_dt.replace(tzinfo=None).isoformat(timespec="seconds")
     tl.last_bar_close = c
+    tl.last_tick_bar_dt = bar_key
 
 
 def record_finalized_2min_candle(
@@ -180,11 +215,16 @@ def record_finalized_2min_candle(
     high: float,
     low: float,
     close: float,
+    volume: Optional[float] = None,
     vwap: Optional[float] = None,
     ema9: Optional[float] = None,
 ) -> None:
     """
     Append a completed 2-min OHLC candle. Idempotent for the tail row.
+
+    ``volume`` is the authoritative aggregated volume from the DB row
+    (or the historical seed). It replaces whatever the in-progress
+    tick-accumulated value was for this interval.
 
     ``vwap`` / ``ema9`` are the finalize-time indicator values (see
     ``SymbolSessionState.apply_bar``). They ride along on the candle dict so
@@ -197,6 +237,7 @@ def record_finalized_2min_candle(
     candle = {
         "ts": ts, "t": iso,
         "o": float(open_), "h": float(high), "l": float(low), "c": float(close),
+        "v": _clean_float(volume),
         "vwap": _clean_float(vwap),
         "ema9": _clean_float(ema9),
     }
@@ -256,6 +297,9 @@ def seed_from_history(symbol: str, rows: list) -> None:
         ema9 = _get_optional("ema9")
         if ema9 is None:
             ema9 = _get_optional("Ema9")
+        volume = _get_optional("volume")
+        if volume is None:
+            volume = _get_optional("Volume")
         record_finalized_2min_candle(
             symbol=symbol,
             candle_dt=candle_dt,
@@ -263,6 +307,7 @@ def seed_from_history(symbol: str, rows: list) -> None:
             high=float(_get_field("high")),
             low=float(_get_field("low")),
             close=float(_get_field("close")),
+            volume=volume,
             vwap=vwap,
             ema9=ema9,
         )

@@ -47,7 +47,14 @@ def make_hooks(viz: ModuleType) -> SimpleNamespace:
     """
 
     def on_bar(symbol: str, bar_time_local: datetime, bar: RealTimeBar) -> None:
-        """Feed the current in-progress 2-min candle from one 5-sec tick."""
+        """
+        Feed the current in-progress 2-min candle from one 5-sec tick.
+        Volume is forwarded so the dashboard's histogram builds up
+        during the interval; the shared ``candle_timeline`` dedupes
+        repeat calls for the same bar so we don't double-count when
+        ``process_bar`` has already recorded this bar itself.
+        """
+        volume = getattr(bar, "volume", None)
         viz.record_5s_tick(
             symbol,
             bar_time_local,
@@ -55,6 +62,7 @@ def make_hooks(viz: ModuleType) -> SimpleNamespace:
             float(bar.high),
             float(bar.low),
             float(bar.close),
+            volume=float(volume) if volume is not None else None,
         )
 
     def on_reference(symbol: str, breakout_level: object) -> None:
