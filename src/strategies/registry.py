@@ -23,9 +23,6 @@ Three registries, keyed by cadence + role:
 
 from __future__ import annotations
 
-from src.strategies.entry_strategies import (
-    reversal_long,
-)
 from src.strategies.exit_strategies import (
     endofday_exit,
     momentum_long_exit,
@@ -36,12 +33,15 @@ from src.strategies.exit_strategies import (
 )
 from src.strategies.orb_long.strategy import orb_breakout
 from src.strategies.orb_short.strategy import orb_breakdown
+from src.strategies.reversal_long.strategy import reversal_long
+from src.strategies.reversal_short.strategy import reversal_short
 from src.strategies.vwap_continuation_long.strategy import vwap_continuation_long
 
 
 # Candle-driven (2-min) entries. Callable: fn(candle) -> coroutine.
 ENTRY_STRATEGIES: list = [
     reversal_long,
+    reversal_short,
     vwap_continuation_long,
 ]
 

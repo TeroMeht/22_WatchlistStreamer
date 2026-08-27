@@ -50,6 +50,7 @@ from typing import Optional
 from src.strategies.orb_long.visualization import state as orb_viz
 from src.strategies.orb_short.visualization import state as orb_short_viz
 from src.strategies.reversal_long.visualization import state as reversal_viz
+from src.strategies.reversal_short.visualization import state as reversal_short_viz
 from src.strategies.vwap_continuation_long.visualization import state as vwap_cont_viz
 from src.strategies.dispatcher_state import get_watchlist_strategies_for
 
@@ -69,14 +70,18 @@ def _merged_snapshot() -> dict:
     orb_snap = orb_viz.snapshot()
     orb_short_snap = orb_short_viz.snapshot()
     rev_snap = reversal_viz.snapshot()
+    rev_short_snap = reversal_short_viz.snapshot()
     vwap_snap = vwap_cont_viz.snapshot()
 
     orb_by_sym       = {s["symbol"]: s for s in orb_snap.get("symbols", [])}
     orb_short_by_sym = {s["symbol"]: s for s in orb_short_snap.get("symbols", [])}
     rev_by_sym       = {s["symbol"]: s for s in rev_snap.get("symbols", [])}
+    rev_short_by_sym = {s["symbol"]: s for s in rev_short_snap.get("symbols", [])}
     vwap_by_sym      = {s["symbol"]: s for s in vwap_snap.get("symbols", [])}
     all_syms = sorted(
-        set(orb_by_sym) | set(orb_short_by_sym) | set(rev_by_sym) | set(vwap_by_sym),
+        set(orb_by_sym) | set(orb_short_by_sym)
+        | set(rev_by_sym) | set(rev_short_by_sym)
+        | set(vwap_by_sym),
     )
 
     merged = []
@@ -84,15 +89,21 @@ def _merged_snapshot() -> dict:
         o   = orb_by_sym.get(sym, {})
         os_ = orb_short_by_sym.get(sym, {})
         r   = rev_by_sym.get(sym, {})
+        rs  = rev_short_by_sym.get(sym, {})
         v   = vwap_by_sym.get(sym, {})
         # Candles + last-bar snapshot come from whichever strategy has
-        # them; the shared candle_timeline populates all four the same
+        # them; the shared candle_timeline populates all five the same
         # way, so any non-empty source works.
-        candles = o.get("candles") or os_.get("candles") or r.get("candles") or v.get("candles") or []
+        candles = (
+            o.get("candles") or os_.get("candles")
+            or r.get("candles") or rs.get("candles")
+            or v.get("candles") or []
+        )
         last_bar_time = (
             o.get("last_bar_time")
             or os_.get("last_bar_time")
             or r.get("last_bar_time")
+            or rs.get("last_bar_time")
             or v.get("last_bar_time")
         )
         last_bar_close = (
@@ -102,6 +113,8 @@ def _merged_snapshot() -> dict:
             if os_.get("last_bar_close") is not None
             else r.get("last_bar_close")
             if r.get("last_bar_close") is not None
+            else rs.get("last_bar_close")
+            if rs.get("last_bar_close") is not None
             else v.get("last_bar_close")
         )
         merged.append({
@@ -159,6 +172,19 @@ def _merged_snapshot() -> dict:
                 "filters":           r.get("filters", []),
                 "fires":             r.get("fires", []),
             },
+            "reversal_short": {
+                # Same shape as ``reversal``. The shared
+                # ``ReversalStrategy`` class remaps the reference for
+                # short (breakdown level -> ``ref_close``, stop anchor
+                # -> ``ref_low``), so the JS overlay code stays
+                # direction-agnostic just as it does for ORB short.
+                "ref_time":          rs.get("ref_time"),
+                "ref_close":         rs.get("ref_close"),
+                "ref_low":           rs.get("ref_low"),
+                "ref_field":         rs.get("ref_field"),
+                "filters":           rs.get("filters", []),
+                "fires":             rs.get("fires", []),
+            },
             "vwap_cont": {
                 "ref_time":          v.get("ref_time"),
                 "ref_close":         v.get("ref_close"),
@@ -201,6 +227,7 @@ _DASHBOARD_HTML = r"""<!doctype html>
     --tag-orb:       #d85a30;
     --tag-orb-short: #185fa5;
     --tag-rev:       #185fa5;
+    --tag-rev-short: #d85a30;
     --tag-vwap:      #ba7517;
   }
   * { box-sizing: border-box; }
@@ -223,6 +250,7 @@ _DASHBOARD_HTML = r"""<!doctype html>
   .strategy-tag.orb-tag       { color: var(--tag-orb);       border-color: var(--tag-orb); }
   .strategy-tag.orb-short-tag { color: var(--tag-orb-short); border-color: var(--tag-orb-short); }
   .strategy-tag.rev-tag       { color: var(--tag-rev);       border-color: var(--tag-rev); }
+  .strategy-tag.rev-short-tag { color: var(--tag-rev-short); border-color: var(--tag-rev-short); }
   .strategy-tag.vwap-tag      { color: var(--tag-vwap);      border-color: var(--tag-vwap); }
 
   .info { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -516,13 +544,20 @@ function renderFilterChecks(card, filters) {
 // symbol don't stomp each other's stop line).
 // -----------------------------------------------------------------------
 
-function renderOverlays(card, strat, stopSuffix, direction) {
+function renderOverlays(card, strat, stopSuffix, direction, latestOnly) {
   // ``direction`` is 'long' (default) or 'short'. It controls only the
   // fire marker: long entries sit BELOW the trigger candle with an
   // up-arrow; short entries sit ABOVE the trigger candle with a
   // down-arrow -- the visual reads the same way the trade does.
   // Every other overlay (reference line, stop line) is direction-agnostic
   // because ORBStrategy already remaps the reference for short.
+  //
+  // ``latestOnly`` (default false) = drop every past fire's marker and
+  // only render the newest one. Pass true for strategies that fire
+  // repeatedly and treat each fire as a fresh trade (reversal_long /
+  // reversal_short) -- the older stop levels + markers stop applying
+  // the instant the next fire lands. ORB / VWAP-continuation fire once
+  // per session so the difference is invisible for them.
   const isShort = direction === 'short';
 
   upsertLine(card, 'refLine',
@@ -532,9 +567,17 @@ function renderOverlays(card, strat, stopSuffix, direction) {
     css('--breakout-line') || '#d85a30',
     (strat.ref_field || 'ref') + ' ' + (strat.ref_time ? strat.ref_time.slice(0, 5) : '') + ' ');
 
-  const lf = (strat.fires && strat.fires.length) ? strat.fires[strat.fires.length - 1] : null;
+  const fires = strat.fires || [];
+  const lf = fires.length ? fires[fires.length - 1] : null;
   const stop = (lf && lf.stop != null) ? lf.stop : null;
-  const stopSig = stop != null ? (stop + '|' + stopSuffix) : null;
+  // Include the fire's timestamp in the stop signature so re-firing at
+  // the SAME stop level (rare but possible when the window doesn't
+  // move) still tears the old line down and redraws a fresh one --
+  // otherwise ``stopSig`` wouldn't change and the "clean up before
+  // adding the new one" contract would silently break for that case.
+  const stopSig = stop != null
+    ? (stop + '|' + (lf.ts || 0) + '|' + stopSuffix)
+    : null;
   if (stopSig !== card.stopLineKey) {
     if (card.stopLine) card.series.removePriceLine(card.stopLine);
     card.stopLine = null; card.stopLineKey = null;
@@ -548,10 +591,17 @@ function renderOverlays(card, strat, stopSuffix, direction) {
     }
   }
 
-  const fires = strat.fires || [];
-  // Bump the signature when direction changes so a card that swapped
-  // sides (would only happen in dev) redraws its markers.
-  const sig = fires.length + '_' + (fires.length ? fires[fires.length - 1].ts : 0) + '_' + (isShort ? 's' : 'l');
+  // For ``latestOnly`` strategies, only the newest fire's marker
+  // stays on the chart. ``setMarkers`` REPLACES the marker set, so
+  // handing it a one-element array (or an empty array) drops every
+  // older marker cleanly on the next paint.
+  const displayFires = latestOnly ? (lf ? [lf] : []) : fires;
+  // Bump the signature when direction / mode changes so a card that
+  // swapped sides or modes (dev only) redraws its markers.
+  const sig = displayFires.length
+    + '_' + (displayFires.length ? displayFires[displayFires.length - 1].ts : 0)
+    + '_' + (isShort ? 's' : 'l')
+    + '_' + (latestOnly ? '1' : 'n');
   if (sig !== card.lastFireSig) {
     const markerPos   = isShort ? 'aboveBar' : 'belowBar';
     const markerShape = isShort ? 'arrowDown' : 'arrowUp';
@@ -561,7 +611,7 @@ function renderOverlays(card, strat, stopSuffix, direction) {
     // chart background (light theme + red / green candles). The arrow
     // shape still points the trade direction, so the visual cue does
     // not depend on the arrow being green.
-    card.series.setMarkers(fires.map(f => ({
+    card.series.setMarkers(displayFires.map(f => ({
       time: f.ts, position: markerPos,
       color: '#000000', shape: markerShape,
       text: 'FIRE @ ' + f.c.toFixed(2) + (f.stop != null ? '  stop ' + f.stop.toFixed(2) : ''),
@@ -664,7 +714,48 @@ function updateReversalCard(card, sym) {
 
   renderFilterChecks(card, r.filters || []);
   updateChartCandles(card, sym);
-  renderOverlays(card, r, 'revstop', 'long');
+  // reversal fires multiple times per session; treat each fire as a
+  // fresh trade so the chart cleans up the prior stop line + fire
+  // marker before drawing the newest one.
+  renderOverlays(card, r, 'revstop', 'long', true);
+}
+
+// -----------------------------------------------------------------------
+// reversal_short card
+//
+// Mirror of the reversal_long card. The server-side ReversalStrategy
+// class remaps the reference for short direction (breakdown level ->
+// ``ref_close``, stop anchor -> ``ref_low``), so the shared overlay
+// helper draws exactly the right two lines with no direction-specific
+// JS. Info tile says "2-bar low" so a glance makes the side obvious.
+// -----------------------------------------------------------------------
+
+function createReversalShortCard(sym) {
+  return baseCard(sym, 'reversal_short', 'rev-short-tag',
+    '<div><div class="k">last 5s tick</div><div class="v last-t">--</div></div>'
+    + '<div><div class="k">last 5s price</div><div class="v last-c">--</div></div>'
+    + '<div><div class="k">2-bar low</div><div class="v ref-c">--</div></div>'
+    + '<div><div class="k">ref 2m candle</div><div class="v ref-t">--</div></div>'
+    + '<div><div class="k">stop level</div><div class="v stop-v">--</div></div>',
+    '');
+}
+
+function updateReversalShortCard(card, sym) {
+  const rs = sym.reversal_short || {};
+  const price = sym.last_bar_close;
+  const q = (sel) => card.element.querySelector(sel);
+  q('.last-t').textContent = sym.last_bar_time || '--';
+  q('.last-c').textContent = price != null ? price.toFixed(2) : '--';
+  q('.ref-c').textContent = rs.ref_close != null ? rs.ref_close.toFixed(2) : '--';
+  q('.ref-t').textContent = rs.ref_time || '--';
+  const lf = (rs.fires && rs.fires.length) ? rs.fires[rs.fires.length - 1] : null;
+  q('.stop-v').textContent = (lf && lf.stop != null) ? lf.stop.toFixed(2) : '--';
+
+  renderFilterChecks(card, rs.filters || []);
+  updateChartCandles(card, sym);
+  // reversal_short fires multiple times per session -- same latest-only
+  // treatment as reversal_long.
+  renderOverlays(card, rs, 'revshortstop', 'short', true);
 }
 
 // -----------------------------------------------------------------------
@@ -807,10 +898,12 @@ function render(data) {
 
   data.symbols.forEach(sym => {
     // Only emit cards for strategies the user actually armed on the
-    // watchlist for this symbol. Registry keys are the source of truth:
+    // watchlist for this symbol. Registry keys are the source of truth
+    // and match ``fn.__name__`` on every registered strategy:
     //   "orb_breakout"           -> ORB long card
     //   "orb_breakdown"          -> ORB short card
-    //   "reversal_long_breakout" -> reversal_long card
+    //   "reversal_long"          -> reversal_long card
+    //   "reversal_short"         -> reversal_short card
     //   "vwap_continuation_long" -> VWAP continuation long card
     const armed = new Set(sym.strategies || []);
     if (armed.has('orb_breakout')) {
@@ -819,8 +912,11 @@ function render(data) {
     if (armed.has('orb_breakdown')) {
       upsert('orb_short', sym, createOrbShortCard, updateOrbShortCard);
     }
-    if (armed.has('reversal_long_breakout')) {
+    if (armed.has('reversal_long')) {
       upsert('reversal', sym, createReversalCard, updateReversalCard);
+    }
+    if (armed.has('reversal_short')) {
+      upsert('reversal_short', sym, createReversalShortCard, updateReversalShortCard);
     }
     if (armed.has('vwap_continuation_long')) {
       upsert('vwap_cont', sym, createVwapContCard, updateVwapContCard);
