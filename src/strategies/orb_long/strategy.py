@@ -20,7 +20,7 @@ from .visualization import state as viz
 
 
 # Signal name used in the alarm row + Telegram message when this fires.
-ORB_LONG_SIGNAL_NAME: str = "ORB long breakout"
+ORB_LONG_SIGNAL_NAME: str = "orb_breakout"
 
 
 _impl = ORBStrategy(

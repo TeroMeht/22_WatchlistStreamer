@@ -1,39 +1,3 @@
-"""
-ORB long entry-strategy filters.
-
-Each filter is a small async function that returns a ``FilterResult``:
-an ``(id, label, passed, detail)`` tuple. Filters are pure -- they only
-read data (DB or in-memory state), never write, never touch alarms/orders,
-never touch the visualization state.
-
-One wrapper -- ``evaluate_filters`` -- runs every filter, aggregates the
-results, and returns ``(all_passed, results)`` to the strategy. The
-strategy logs the outcome (via ``format_summary``) and hands the results
-list to the viz layer for dashboard rendering; this module has no side
-effects beyond DB reads.
-
-Long-side gates (all must pass):
-    * price >= premarket high
-    * Rvol  >= settings.RVOL_THRESHOLD
-    * price >  yesterday's RTH high
-    * price >  yesterday's RTH close
-
-``FilterResult`` fields:
-    id      -- stable identifier for the filter (e.g. ``"rvol"``). The
-               dashboard uses this to keep a row across polls, so it
-               must not change once shipped.
-    label   -- human-readable rule statement WITH the live threshold
-               baked in (e.g. ``"Rvol >= 1.50"``).
-    passed  -- did the filter pass on this evaluation?
-    detail  -- right-hand text on the dashboard row and the log fragment.
-
-Signature contract for every filter:
-    async def check_<name>(...) -> FilterResult
-        passed=True  -> allowed to proceed
-        passed=False -> strategy short-circuits; ``detail`` is safe to
-                        include in a log line
-"""
-
 from __future__ import annotations
 
 import logging

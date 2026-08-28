@@ -11,9 +11,10 @@ from src.core.config import settings
 from src.database.db_functions import get_session_rows
 
 from src.strategies.actions import fire_signal
-from src.strategies.breakout_level import get_reference_from_opening_range
-from src.strategies.detection import detect_breakout
 from src.strategies.hooks import make_hooks
+
+from .breakout_level import get_reference_from_opening_range
+from .detection import detect_breakout
 
 logger = logging.getLogger(__name__)
 

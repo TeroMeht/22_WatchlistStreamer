@@ -4,6 +4,13 @@ import logging
 from src.helpers.utils import *
 from src.alarms.send_postrequest import send_exit_request_to_fastapi
 from src.core.config import settings
+# ``detect_capitulation`` / ``detect_euforia`` moved out of alarm_logics
+# and now live next to the reversal strategies -- import them explicitly
+# so the star import above stays clean.
+from src.strategies.reversal_shared.detection import (
+    detect_capitulation,
+    detect_euforia,
+)
 
 logger = logging.getLogger(__name__)
 

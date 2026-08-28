@@ -25,11 +25,12 @@ class FilterResult(NamedTuple):
 # =============================================================================
 
 
-def check_rvol_gte(df_all: pd.DataFrame, threshold: float) -> FilterResult:
+def check_rvol_gte(df_last: pd.DataFrame, threshold: float) -> FilterResult:
 
-    label = f"rvol"
-
-    rvol = float(df_all.iloc[-1]["rvol"])
+    label = f"Rvol >= {threshold:.2f}"
+    if df_last.empty:
+        return FilterResult("rvol", label, False, "no 2m candle in livestream yet")
+    rvol = float(df_last.iloc[-1]["rvol"])
     return FilterResult(
         id="rvol",
         label=label,
@@ -160,13 +161,13 @@ async def evaluate_filters(symbol: str) -> Tuple[bool, List[FilterResult]]:
     ``process_incoming_data``), so the tail row IS the candle we're
     evaluating on.
     """
-    df_all = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=None)
+    df_last = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=None)
 
     results: List[FilterResult] = [
-        check_rvol_gte(df_all, settings.RVOL_THRESHOLD),
-        check_prior_euforia(df_all),
-        check_vwap_touch_since_euforia(df_all, settings.VWAP_DISTANCE),
-        check_ema9_crossover_up(df_all),
+        check_rvol_gte(df_last, settings.RVOL_THRESHOLD),
+        check_prior_euforia(df_last),
+        check_vwap_touch_since_euforia(df_last, settings.VWAP_DISTANCE),
+        check_ema9_crossover_up(df_last),
     ]
 
     return all(r.passed for r in results), results

@@ -1,14 +1,3 @@
-"""
-Shared breakout / breakdown detection primitive for entry strategies.
-
-Stateless predicate: given the incoming live price, a level, and a
-direction, return a labelled ``BreakoutEvent``. The "don't re-fire this
-session" concern is owned by each strategy's session latch, not here.
-
-Direction is one of:
-    * ``"long"``  -- fires when ``live_price >  level`` (break UP)
-    * ``"short"`` -- fires when ``live_price <  level`` (break DOWN)
-"""
 
 from __future__ import annotations
 

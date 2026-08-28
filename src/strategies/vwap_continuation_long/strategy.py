@@ -55,11 +55,11 @@ logger = logging.getLogger(__name__)
 
 
 # Signal name used in the alarm row + Telegram message when this strategy fires.
-VWAP_CONTINUATION_LONG_SIGNAL_NAME: str = "VWAP continuation long"
+VWAP_CONTINUATION_LONG_SIGNAL_NAME: str = "vwap_continuation_long"
 
 # How many recent 2-min candles feed the stop-level calculation. Same
 # livestream source the filters read from; long direction.
-STOP_LOOKBACK_CANDLES: int = 5
+STOP_LOOKBACK_CANDLES: int = 8
 
 
 # =============================================================================

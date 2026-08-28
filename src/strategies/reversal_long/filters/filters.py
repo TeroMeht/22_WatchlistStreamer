@@ -1,35 +1,12 @@
-"""
-Setup filters for the reversal_long strategy.
-
-Two filters, both evaluated on every finalized 2-min candle:
-
-    * ``check_ema9_crossover_up`` -- last 2 candles show an EMA9
-      crossover UP (prev close below EMA9, current close above EMA9).
-      Delegates to the shared ``is_crossover_up`` in
-      ``src.helpers.utils`` / ``src.alarms.alarm_logics``.
-    * ``check_recent_capitulation`` -- ``Relatr >= CAPITULATION_THRESHOLD``
-      anywhere in the last ``CAPITULATION_LOOKBACK_CANDLES`` (default 8).
-
-Both must pass on the same candle for the strategy to fire (the
-strategy AND-gates them via ``all(r.passed for r in results)``).
-
-``FilterResult`` mirrors the ORB / vwap_continuation_long filter shape
-so the dashboard's dynamic renderer treats reversal_long rows the same
-way. See ``orb_long.filters.filters`` for the field contract.
-
-``evaluate_filters`` returns ``(all_passed, results)``; ``format_summary``
-formats the results list for log lines. This module has no side effects
-beyond the DB read.
-"""
-
 from __future__ import annotations
 
 import logging
 from typing import List, NamedTuple, Tuple
 
-from src.alarms.alarm_logics import detect_capitulation, is_crossover_up
+from src.alarms.alarm_logics import is_crossover_up
 from src.core.config import settings
 from src.database.db_functions import get_last_rows
+from src.strategies.reversal_shared.detection import detect_capitulation
 
 
 logger = logging.getLogger(__name__)

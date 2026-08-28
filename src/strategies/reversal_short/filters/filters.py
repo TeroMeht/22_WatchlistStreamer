@@ -18,9 +18,10 @@ from __future__ import annotations
 import logging
 from typing import List, NamedTuple, Tuple
 
-from src.alarms.alarm_logics import detect_euforia, is_crossover_down
+from src.alarms.alarm_logics import is_crossover_down
 from src.core.config import settings
 from src.database.db_functions import get_last_rows
+from src.strategies.reversal_shared.detection import detect_euforia
 
 
 logger = logging.getLogger(__name__)
