@@ -164,10 +164,10 @@ async def evaluate_filters(symbol: str) -> Tuple[bool, List[FilterResult]]:
     df_last = await get_last_rows(table_name=f"{symbol.lower()}_livestream", num_rows=None)
 
     results: List[FilterResult] = [
-        check_rvol_gte(df_last, settings.RVOL_THRESHOLD),
+       # check_rvol_gte(df_last, settings.RVOL_THRESHOLD),
         check_prior_euforia(df_last),
         check_vwap_touch_since_euforia(df_last, settings.VWAP_DISTANCE),
-        check_ema9_crossover_up(df_last),
+       # check_ema9_crossover_up(df_last),
     ]
 
     return all(r.passed for r in results), results
