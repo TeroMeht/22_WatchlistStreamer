@@ -236,10 +236,22 @@ wheels = [
 [[package]]
 name = "data-sources"
 version = "0.0.1"
-source = { git = "https://github.com/TeroMeht/data_sources.git?branch=main#fe0d7da187f9a0b69447fec58e9ce66864c92dc6" }
+source = { editable = "../data_sources" }
 dependencies = [
     { name = "pydantic-settings" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", marker = "extra == 'all'" },
+    { name = "aiohttp", marker = "extra == 'polygon'" },
+    { name = "httpx", marker = "extra == 'all'" },
+    { name = "httpx", marker = "extra == 'flex'" },
+    { name = "ib-async", marker = "extra == 'all'" },
+    { name = "ib-async", marker = "extra == 'ib'" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
+]
+provides-extras = ["ib", "polygon", "flex", "all"]
 
 [[package]]
 name = "frozenlist"
@@ -393,11 +405,19 @@ wheels = [
 [[package]]
 name = "indicators"
 version = "0.0.1"
-source = { git = "https://github.com/TeroMeht/indicators.git?branch=main#ae096aa8ef57ac0b995e99be7fece92af1ffd3de" }
+source = { editable = "../indicators" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "pandas", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'test'" },
+]
+provides-extras = ["test"]
 
 [[package]]
 name = "iniconfig"
@@ -1000,10 +1020,10 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.10.0" },
     { name = "asyncpg", specifier = ">=0.30.0" },
-    { name = "data-sources", git = "https://github.com/TeroMeht/data_sources.git?branch=main" },
+    { name = "data-sources", editable = "../data_sources" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "ib-async", specifier = ">=2.0.1" },
-    { name = "indicators", git = "https://github.com/TeroMeht/indicators.git?branch=main" },
+    { name = "indicators", editable = "../indicators" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "pandas", specifier = ">=2.2.0" },
     { name = "plotly", specifier = ">=5.24.0" },

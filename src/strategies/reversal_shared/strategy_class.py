@@ -140,7 +140,7 @@ class ReversalStrategy:
         # and stop-line, so appending here is what "updates the UI to
         # the newest trade".
         await generate_signal_alarm(candle=candle, signal_name=self.signal_name)
-        await generate_entry_order(candle=candle, stop_level=stop_level)
+        #await generate_entry_order(candle=candle, stop_level=stop_level)
 
         # Record the fire on the dashboard. Build a tz-aware datetime so
         # the marker lands on the correct 2-min interval. ``ref_close``

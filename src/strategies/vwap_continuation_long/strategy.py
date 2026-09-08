@@ -110,7 +110,7 @@ async def vwap_continuation_long(candle: CandleRow) -> None:
 
     # --- Phase 5: fire alarm + entry order + viz marker + latch -----------
     await generate_signal_alarm(candle=candle, signal_name=VWAP_CONTINUATION_LONG_SIGNAL_NAME)
-    await generate_entry_order(candle=candle, stop_level=stop_level)
+   # await generate_entry_order(candle=candle, stop_level=stop_level)
 
     # Record the fire on the dashboard. Build a tz-aware datetime so
     # the marker lands on the correct 2-min interval. ``ref_close`` is

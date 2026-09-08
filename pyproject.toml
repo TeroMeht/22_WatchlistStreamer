@@ -26,8 +26,8 @@ dev = [
 ]
 
 [tool.uv.sources]
-data-sources = { git = "https://github.com/TeroMeht/data_sources.git", branch = "main" }
-indicators   = { git = "https://github.com/TeroMeht/indicators.git",   branch = "main" }
+data-sources = { path = "../data_sources", editable = true }
+indicators = { path = "../indicators", editable = true }
 
 [build-system]
 requires = ["hatchling"]
