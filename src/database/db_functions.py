@@ -524,7 +524,7 @@ async def create_orders_table() -> None:
             CREATE TABLE IF NOT EXISTS orders (
                 "id" SERIAL PRIMARY KEY,
                 "symbol" TEXT NOT NULL,
-                "time" TIME WITHOUT TIME ZONE NOT NULL,
+                "time" TIMESTAMP WITH TIME ZONE NOT NULL,
                 "stop" NUMERIC(10, 2) NOT NULL,
                 "date" DATE NOT NULL,
                 "status" TEXT NOT NULL
@@ -562,29 +562,18 @@ async def create_exit_requests_table() -> None:
 
 
 
-
+# ------------------Insert order handling--------------------------------------------------------------
 async def insert_order(candle: CandleRow, stop_level: float):
-    """
-    Insert one row into ``orders``. Raises on any failure so the caller
-    (``generate_entry_order``) can react -- do NOT swallow exceptions
-    here, otherwise gather(..., return_exceptions=True) sees None for
-    every call and the "Entry order inserted" log line lies.
-    """
+
     pool = get_db_pool()
 
     async with pool.acquire() as conn:
-        # Ensure orders table exists (with id)
-        create_table_query = """
-        CREATE TABLE IF NOT EXISTS orders (
-            "id" BIGSERIAL PRIMARY KEY,
-            "symbol" TEXT NOT NULL,
-            "time" TIME NOT NULL,
-            "stop" NUMERIC(10, 2) NOT NULL,
-            "date" DATE NOT NULL,
-            "status" TEXT NOT NULL
-        );
+
+        check_query = """
+            SELECT 1 FROM orders
+            WHERE "symbol" = $1 AND "date" = $2
+            LIMIT 1;
         """
-        await conn.execute(create_table_query)
 
         insert_query = """
             INSERT INTO orders ("symbol", "time", "stop", "date", "status")
@@ -592,10 +581,24 @@ async def insert_order(candle: CandleRow, stop_level: float):
         """
 
         try:
+            existing = await conn.fetchval(check_query, candle.symbol, candle.date)
+            if existing is not None:
+                logging.info(
+                    "Order not created because it already exists: %s %s",
+                    candle.symbol, candle.date,
+                )
+                return
+
+            # The live orders."time" column is TIMESTAMP WITH TIME ZONE, not
+            # a bare TIME (the CREATE TABLE IF NOT EXISTS above no-ops on the
+            # existing table). Combine date + time into a datetime so
+            # asyncpg's timestamptz codec accepts it.
+            order_ts = datetime.combine(candle.date, candle.time)
+
             await conn.execute(
                 insert_query,
                 candle.symbol,     # Symbol column
-                candle.time,       # Time column
+                order_ts,          # Time column (timestamptz)
                 stop_level,        # Stop column
                 candle.date,       # Date column
                 "active"           # Status column

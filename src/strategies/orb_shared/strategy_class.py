@@ -10,6 +10,7 @@ from data_sources._bar import IncomingBar
 from src.core.config import settings
 from src.database.db_functions import get_session_rows
 
+from src.helpers.handle_candles import stream_data_to_candle_row
 from src.strategies.actions import fire_signal
 from src.strategies.hooks import make_hooks
 
@@ -200,9 +201,16 @@ class ORBStrategy:
         )
 
         # --- Phase 6: fire alarm + generate order ------------------------
+        # Realtime strategy: map the 5-sec bar to a CandleRow so the shared
+        # fire pipeline (alarm, order, viz marker, latch) has the same
+        # input shape as the candle-driven strategies.
+        candle = stream_data_to_candle_row(symbol, bar, bar_time_local)
         await fire_signal(
-            bar, symbol, breakout_level, bar_time_local, stop_level,
+            candle=candle,
             signal_name=self.signal_name,
-            hooks=self.hooks,
+            stop_level=stop_level,
+            viz=self.viz,
+            ref_close=float(breakout_level.ref_close),
+            live_price=float(bar.close),
             mark_fired=self.mark_fired,
         )

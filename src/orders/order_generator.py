@@ -45,11 +45,16 @@ async def generate_entry_order(candle: CandleRow, stop_level: float) -> None:
     means one failure mode instead of two.
     """
     try:
-        await send_entry_request_to_fastapi(
-            candle=candle,
-            stop_level=stop_level,
-            fastapi_url=settings.ENTRY_REQUEST_ENDPOINT,
-        )
+        # await send_entry_request_to_fastapi(
+        #     candle=candle,
+        #     stop_level=stop_level,
+        #     fastapi_url=settings.ENTRY_REQUEST_ENDPOINT,
+        # )
+        
+        # Insert order to db
+        await insert_order(candle, stop_level)
+
+
     except Exception:
         logger.exception(
             "Failed to POST entry request for symbol=%s date=%s time=%s stop=%s",

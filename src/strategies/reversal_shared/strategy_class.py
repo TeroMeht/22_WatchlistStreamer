@@ -45,15 +45,12 @@ Fire semantics (per instance, per symbol):
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from types import ModuleType
-from zoneinfo import ZoneInfo
 
-from src.alarms.alarm_generator import generate_signal_alarm
-from src.core.config import settings
 from src.database.db_functions import get_last_rows
 from src.helpers.handle_candles import CandleRow
-from src.orders.order_generator import detect_stoplevel, generate_entry_order
+from src.orders.order_generator import detect_stoplevel
+from src.strategies.actions import fire_signal
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +102,6 @@ class ReversalStrategy:
         symbol = candle.symbol
 
         # --- Phase 1: setup filters --------------------------------------
-        # Evaluate on every finalized candle so the dashboard rows keep
-        # animating between fires.
         filters_passed, filter_results = await self.filters.evaluate_filters(symbol)
         self.viz.record_filter_results(symbol, filter_results)
         filters_summary = self.filters.format_summary(filter_results)
@@ -135,22 +130,11 @@ class ReversalStrategy:
         )
 
         # --- Phase 4: fire alarm + entry order + viz marker -------------
-        # No fire latch: every full-pass candle is a new trade. The
-        # dashboard already reads ``fires[-1]`` for the displayed stop
-        # and stop-line, so appending here is what "updates the UI to
-        # the newest trade".
-        await generate_signal_alarm(candle=candle, signal_name=self.signal_name)
-        #await generate_entry_order(candle=candle, stop_level=stop_level)
-
-        # Record the fire on the dashboard. Build a tz-aware datetime so
-        # the marker lands on the correct 2-min interval. ``ref_close``
-        # is cosmetic for the marker -- pass the candle close so the
-        # record is self-consistent.
-        bar_dt = datetime.combine(candle.date, candle.time).replace(
-            tzinfo=ZoneInfo(settings.TIMEZONE),
-        )
-        self.viz.record_fire(
-            symbol, bar_dt, float(candle.close),
+        # NO one-shot latch here -- reversal can fire repeatedly per
+        # session; we deliberately don't pass mark_fired.
+        await fire_signal(
+            candle=candle,
+            signal_name=self.signal_name,
             stop_level=float(stop_level),
-            ref_close=float(candle.close),
+            viz=self.viz,
         )

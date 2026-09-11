@@ -97,7 +97,7 @@ async def momentum_short_exit(candle: CandleRow):
 async def endofday_exit(candle: CandleRow):
     logger.info("Running EoD exit for symbol: %s", candle.symbol)
 
-    if candle.time >= settings.EOD_EXIT_TIME:
+    if candle.time >= settings.ENDOFDAY:
         logger.debug("EoD exit time reached for symbol: %s. Sending exit request...", candle.symbol)
         await send_exit_request_to_fastapi(
             candle=candle,

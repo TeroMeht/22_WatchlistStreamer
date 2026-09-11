@@ -83,6 +83,28 @@ def check_recent_euforia(
     )
 
 
+def check_current_relatr_depressed(df) -> FilterResult:
+    """
+    Pass when the CURRENT (triggering) candle still has
+    ``Relatr <= EUFORIC_THRESHOLD`` (signed / negative). Guards against
+    entries where the euforic stretch has already faded before the
+    EMA9 crossover DOWN prints -- we only want to fire the short
+    reversal while the upside stretch is still present on the crossover
+    candle itself.
+    """
+    threshold = float(settings.EUFORIC_THRESHOLD)
+    label = "Current relatr still depressed"
+
+    curr_relatr = float(df.iloc[-1]["relatr"])
+    passed = curr_relatr <= threshold
+    return FilterResult(
+        id="curr_relatr",
+        label=label,
+        passed=passed,
+        detail=f"curr relatr = {curr_relatr:.2f} (<= {threshold:.2f})",
+    )
+
+
 # =============================================================================
 # Aggregate wrapper + log formatter
 # =============================================================================
@@ -110,7 +132,7 @@ async def evaluate_filters(symbol: str) -> Tuple[bool, List[FilterResult]]:
     results: List[FilterResult] = [
         check_recent_euforia(df),
         check_ema9_crossover_down(df),
-        
+        check_current_relatr_depressed(df),
     ]
 
     return all(r.passed for r in results), results

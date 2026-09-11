@@ -38,14 +38,11 @@ armed strategy -- no per-tick growing candle.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
-from src.alarms.alarm_generator import generate_signal_alarm
-from src.core.config import settings
 from src.database.db_functions import get_last_rows
 from src.helpers.handle_candles import CandleRow
-from src.orders.order_generator import detect_stoplevel, generate_entry_order
+from src.orders.order_generator import detect_stoplevel
+from src.strategies.actions import fire_signal
 
 from .filters.filters import evaluate_filters, format_summary
 from .state import has_fired, mark_fired
@@ -109,19 +106,10 @@ async def vwap_continuation_long(candle: CandleRow) -> None:
     )
 
     # --- Phase 5: fire alarm + entry order + viz marker + latch -----------
-    await generate_signal_alarm(candle=candle, signal_name=VWAP_CONTINUATION_LONG_SIGNAL_NAME)
-   # await generate_entry_order(candle=candle, stop_level=stop_level)
-
-    # Record the fire on the dashboard. Build a tz-aware datetime so
-    # the marker lands on the correct 2-min interval. ``ref_close`` is
-    # cosmetic for the marker -- pass the candle close so the record
-    # is self-consistent.
-    bar_dt = datetime.combine(candle.date, candle.time).replace(
-        tzinfo=ZoneInfo(settings.TIMEZONE),
-    )
-    viz.record_fire(
-        symbol, bar_dt, float(candle.close),
+    await fire_signal(
+        candle=candle,
+        signal_name=VWAP_CONTINUATION_LONG_SIGNAL_NAME,
         stop_level=float(stop_level),
-        ref_close=float(candle.close),
+        viz=viz,
+        mark_fired=mark_fired,
     )
-    mark_fired(symbol)

@@ -73,6 +73,27 @@ def check_recent_capitulation(
     )
 
 
+def check_current_relatr_elevated(df) -> FilterResult:
+    """
+    Pass when the CURRENT (triggering) candle still has
+    ``Relatr >= CAPITULATION_THRESHOLD``. Guards against entries where
+    the capitulation happened several candles ago and Relatr has since
+    normalised -- we only want to fire the reversal while the downside
+    stretch is still present on the crossover candle itself.
+    """
+    threshold = float(settings.CAPITULATION_THRESHOLD)
+    label = "Current relatr still elevated"
+
+    curr_relatr = float(df.iloc[-1]["relatr"])
+    passed = curr_relatr >= threshold
+    return FilterResult(
+        id="curr_relatr",
+        label=label,
+        passed=passed,
+        detail=f"curr relatr = {curr_relatr:.2f} (>= {threshold:.2f})",
+    )
+
+
 # =============================================================================
 # Aggregate wrapper + log formatter
 # =============================================================================
@@ -100,7 +121,7 @@ async def evaluate_filters(symbol: str) -> Tuple[bool, List[FilterResult]]:
     results: List[FilterResult] = [
         check_recent_capitulation(df),
         check_ema9_crossover_up(df),
-        
+        #check_current_relatr_elevated(df),
     ]
 
     return all(r.passed for r in results), results
