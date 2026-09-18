@@ -35,6 +35,7 @@ from src.strategies.orb_long.strategy import orb_breakout
 from src.strategies.orb_short.strategy import orb_breakdown
 from src.strategies.reversal_long.strategy import reversal_long
 from src.strategies.reversal_short.strategy import reversal_short
+from src.strategies.two_bar_breakentry.strategy import two_bar_breakentry
 from src.strategies.vwap_continuation_long.strategy import vwap_continuation_long
 
 
@@ -59,4 +60,5 @@ EXIT_STRATEGIES: list = [
 REALTIME_ENTRY_STRATEGIES: list = [
     orb_breakout,
     orb_breakdown,
+    two_bar_breakentry,
 ]

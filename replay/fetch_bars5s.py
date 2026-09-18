@@ -23,13 +23,13 @@ from pathlib import Path
 from ib_async import IB, Stock
 
 # ============ CONFIG ============
-SYMBOL      = "RDW"
-DATE        = "2026-09-09"          # YYYY-MM-DD (local calendar date)
+SYMBOL      = "CRCL"
+DATE        = "2026-09-15"          # YYYY-MM-DD (local calendar date)
 EXCHANGE    = "SMART"
 CURRENCY    = "USD"
 
 HOST        = "127.0.0.1"
-PORT        = 4002                  # 7497 paper TWS, 7496 live TWS, 4002/4001 gateway
+PORT        = 4001                  # 7497 paper TWS, 7496 live TWS, 4002/4001 gateway
 CLIENT_ID   = 20
 
 USE_RTH     = False                 # True = regular trading hours only
@@ -39,7 +39,7 @@ TIMEZONE    = "Europe/Helsinki"     # output timestamp tz (matches settings.TIME
 # regenerated at the end of the run. Keep in the CONFIG block so a single
 # edit to (SYMBOL, DATE, STRATEGY) drives the CSV name, the CSV contents,
 # and the watchlist row the replay run will actually pick up.
-STRATEGY    = "reversal_long"
+STRATEGY    = 'two_bar_breakentry'
 
 # Hard-coded output directory + file. Every replay run points the streamer
 # at OUT_DIR, so we scrub *.csv there before fetching -- otherwise stale

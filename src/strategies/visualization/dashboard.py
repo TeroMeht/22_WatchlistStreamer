@@ -17,12 +17,14 @@ Merged snapshot shape returned by ``/api/state``:
           "candles": [...],           # shared: same 2m bars for all strategies
           "last_bar_time": "...",
           "last_bar_close": 6.20,
-          "orb":       { ref_close, ref_low, ref_time, ref_field,
-                         yesterday_high, yesterday_close, filters, fires },
-          "reversal":  { ref_close, ref_low, ref_time, ref_field,
-                         filters, fires },
-          "vwap_cont": { ref_close, ref_low, ref_time, ref_field,
-                         filters, fires }
+          "orb":                { ref_close, ref_low, ref_time, ref_field,
+                                  yesterday_high, yesterday_close, filters, fires },
+          "reversal":           { ref_close, ref_low, ref_time, ref_field,
+                                  filters, fires },
+          "two_bar_breakentry": { ref_close, ref_low, ref_time, ref_field,
+                                  filters, fires },
+          "vwap_cont":          { ref_close, ref_low, ref_time, ref_field,
+                                  filters, fires }
         },
         ...
       ]
@@ -51,6 +53,7 @@ from src.strategies.orb_long.visualization import state as orb_viz
 from src.strategies.orb_short.visualization import state as orb_short_viz
 from src.strategies.reversal_long.visualization import state as reversal_viz
 from src.strategies.reversal_short.visualization import state as reversal_short_viz
+from src.strategies.two_bar_breakentry.visualization import state as two_bar_break_viz
 from src.strategies.vwap_continuation_long.visualization import state as vwap_cont_viz
 from src.strategies.dispatcher_state import get_watchlist_strategies_for
 
@@ -71,16 +74,19 @@ def _merged_snapshot() -> dict:
     orb_short_snap = orb_short_viz.snapshot()
     rev_snap = reversal_viz.snapshot()
     rev_short_snap = reversal_short_viz.snapshot()
+    two_bar_break_snap = two_bar_break_viz.snapshot()
     vwap_snap = vwap_cont_viz.snapshot()
 
-    orb_by_sym       = {s["symbol"]: s for s in orb_snap.get("symbols", [])}
-    orb_short_by_sym = {s["symbol"]: s for s in orb_short_snap.get("symbols", [])}
-    rev_by_sym       = {s["symbol"]: s for s in rev_snap.get("symbols", [])}
-    rev_short_by_sym = {s["symbol"]: s for s in rev_short_snap.get("symbols", [])}
-    vwap_by_sym      = {s["symbol"]: s for s in vwap_snap.get("symbols", [])}
+    orb_by_sym           = {s["symbol"]: s for s in orb_snap.get("symbols", [])}
+    orb_short_by_sym     = {s["symbol"]: s for s in orb_short_snap.get("symbols", [])}
+    rev_by_sym           = {s["symbol"]: s for s in rev_snap.get("symbols", [])}
+    rev_short_by_sym     = {s["symbol"]: s for s in rev_short_snap.get("symbols", [])}
+    two_bar_break_by_sym = {s["symbol"]: s for s in two_bar_break_snap.get("symbols", [])}
+    vwap_by_sym          = {s["symbol"]: s for s in vwap_snap.get("symbols", [])}
     all_syms = sorted(
         set(orb_by_sym) | set(orb_short_by_sym)
         | set(rev_by_sym) | set(rev_short_by_sym)
+        | set(two_bar_break_by_sym)
         | set(vwap_by_sym),
     )
 
@@ -90,13 +96,15 @@ def _merged_snapshot() -> dict:
         os_ = orb_short_by_sym.get(sym, {})
         r   = rev_by_sym.get(sym, {})
         rs  = rev_short_by_sym.get(sym, {})
+        tb  = two_bar_break_by_sym.get(sym, {})
         v   = vwap_by_sym.get(sym, {})
         # Candles + last-bar snapshot come from whichever strategy has
-        # them; the shared candle_timeline populates all five the same
+        # them; the shared candle_timeline populates all six the same
         # way, so any non-empty source works.
         candles = (
             o.get("candles") or os_.get("candles")
             or r.get("candles") or rs.get("candles")
+            or tb.get("candles")
             or v.get("candles") or []
         )
         last_bar_time = (
@@ -104,6 +112,7 @@ def _merged_snapshot() -> dict:
             or os_.get("last_bar_time")
             or r.get("last_bar_time")
             or rs.get("last_bar_time")
+            or tb.get("last_bar_time")
             or v.get("last_bar_time")
         )
         last_bar_close = (
@@ -115,6 +124,8 @@ def _merged_snapshot() -> dict:
             if r.get("last_bar_close") is not None
             else rs.get("last_bar_close")
             if rs.get("last_bar_close") is not None
+            else tb.get("last_bar_close")
+            if tb.get("last_bar_close") is not None
             else v.get("last_bar_close")
         )
         merged.append({
@@ -185,6 +196,20 @@ def _merged_snapshot() -> dict:
                 "filters":           rs.get("filters", []),
                 "fires":             rs.get("fires", []),
             },
+            "two_bar_breakentry": {
+                # Realtime long entry off a reversal_long setup. Reference
+                # is the rolling max High of the last two 2-min candles
+                # (built by ``get_reference_from_last_two_candles``); stop
+                # anchor is that same window's min Low. Same
+                # ``filters`` / ``fires`` shape as every other strategy so
+                # the JS overlay + check-row helpers stay generic.
+                "ref_time":          tb.get("ref_time"),
+                "ref_close":         tb.get("ref_close"),
+                "ref_low":           tb.get("ref_low"),
+                "ref_field":         tb.get("ref_field"),
+                "filters":           tb.get("filters", []),
+                "fires":             tb.get("fires", []),
+            },
             "vwap_cont": {
                 "ref_time":          v.get("ref_time"),
                 "ref_close":         v.get("ref_close"),
@@ -228,6 +253,7 @@ _DASHBOARD_HTML = r"""<!doctype html>
     --tag-orb-short: #185fa5;
     --tag-rev:       #185fa5;
     --tag-rev-short: #d85a30;
+    --tag-two-bar:   #3b6d11;
     --tag-vwap:      #ba7517;
   }
   * { box-sizing: border-box; }
@@ -251,6 +277,7 @@ _DASHBOARD_HTML = r"""<!doctype html>
   .strategy-tag.orb-short-tag { color: var(--tag-orb-short); border-color: var(--tag-orb-short); }
   .strategy-tag.rev-tag       { color: var(--tag-rev);       border-color: var(--tag-rev); }
   .strategy-tag.rev-short-tag { color: var(--tag-rev-short); border-color: var(--tag-rev-short); }
+  .strategy-tag.two-bar-tag   { color: var(--tag-two-bar);   border-color: var(--tag-two-bar); }
   .strategy-tag.vwap-tag      { color: var(--tag-vwap);      border-color: var(--tag-vwap); }
 
   .info { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -759,6 +786,45 @@ function updateReversalShortCard(card, sym) {
 }
 
 // -----------------------------------------------------------------------
+// two_bar_breakentry card
+//
+// Realtime long entry off a reversal_long setup. Reference is the
+// rolling max High of the last two finalized 2-min candles; the setup
+// filter is a recent-capitulation check. Same overlay contract as the
+// reversal/ORB cards -- ``ref_close`` draws the breakout line,
+// ``fires[-1].stop`` draws the stop line, the fire marker is a green
+// up-arrow below the bar. One-shot per session (matches the server
+// latch), so we do NOT pass ``latestOnly`` -- the historical marker
+// stays where it fired.
+// -----------------------------------------------------------------------
+
+function createTwoBarBreakentryCard(sym) {
+  return baseCard(sym, 'two_bar_breakentry', 'two-bar-tag',
+    '<div><div class="k">last 5s tick</div><div class="v last-t">--</div></div>'
+    + '<div><div class="k">last 5s price</div><div class="v last-c">--</div></div>'
+    + '<div><div class="k">2-bar high</div><div class="v ref-c">--</div></div>'
+    + '<div><div class="k">ref 2m candle</div><div class="v ref-t">--</div></div>'
+    + '<div><div class="k">stop level</div><div class="v stop-v">--</div></div>',
+    '');
+}
+
+function updateTwoBarBreakentryCard(card, sym) {
+  const tb = sym.two_bar_breakentry || {};
+  const price = sym.last_bar_close;
+  const q = (sel) => card.element.querySelector(sel);
+  q('.last-t').textContent = sym.last_bar_time || '--';
+  q('.last-c').textContent = price != null ? price.toFixed(2) : '--';
+  q('.ref-c').textContent = tb.ref_close != null ? tb.ref_close.toFixed(2) : '--';
+  q('.ref-t').textContent = tb.ref_time || '--';
+  const lf = (tb.fires && tb.fires.length) ? tb.fires[tb.fires.length - 1] : null;
+  q('.stop-v').textContent = (lf && lf.stop != null) ? lf.stop.toFixed(2) : '--';
+
+  renderFilterChecks(card, tb.filters || []);
+  updateChartCandles(card, sym);
+  renderOverlays(card, tb, 'twobarstop', 'long');
+}
+
+// -----------------------------------------------------------------------
 // vwap_continuation_long card
 // -----------------------------------------------------------------------
 
@@ -904,6 +970,7 @@ function render(data) {
     //   "orb_breakdown"          -> ORB short card
     //   "reversal_long"          -> reversal_long card
     //   "reversal_short"         -> reversal_short card
+    //   "two_bar_breakentry"     -> two_bar_breakentry card
     //   "vwap_continuation_long" -> VWAP continuation long card
     const armed = new Set(sym.strategies || []);
     if (armed.has('orb_breakout')) {
@@ -917,6 +984,9 @@ function render(data) {
     }
     if (armed.has('reversal_short')) {
       upsert('reversal_short', sym, createReversalShortCard, updateReversalShortCard);
+    }
+    if (armed.has('two_bar_breakentry')) {
+      upsert('two_bar_breakentry', sym, createTwoBarBreakentryCard, updateTwoBarBreakentryCard);
     }
     if (armed.has('vwap_continuation_long')) {
       upsert('vwap_cont', sym, createVwapContCard, updateVwapContCard);
