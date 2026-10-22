@@ -86,7 +86,7 @@ def handle_incoming_dataframe_daily(bars: List[IncomingBar], symbol: str) -> pd.
     h_pc = (df["high"] - df["prev_close"].fillna(df["high"])).abs()
     l_pc = (df["low"]  - df["prev_close"].fillna(df["low"])).abs()
     df["tr"]  = np.maximum.reduce([hl.values, h_pc.values, l_pc.values])
-    df["atr"] = atr_series(df["high"], df["low"], df["close"])
+    df["atr"] = atr_series(df["high"], df["low"], df["close"], span=14)
 
     desired_order = [
         "symbol", "date", "open", "high", "low", "close", "volume",
