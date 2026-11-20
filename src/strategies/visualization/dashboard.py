@@ -60,6 +60,8 @@ from src.strategies.reversal_short.visualization import state as reversal_short_
 from src.strategies.two_bar_breakentry.visualization import state as two_bar_break_viz
 from src.strategies.vwap_continuation_long.visualization import state as vwap_cont_viz
 from src.strategies.dispatcher_state import get_watchlist_strategies_for
+import webbrowser
+
 
 logger = logging.getLogger(__name__)
 
@@ -1026,10 +1028,16 @@ poll();
 _runner = None
 
 
-async def start_dashboard(port: int = DASHBOARD_PORT) -> Optional[object]:
+async def start_dashboard(
+    port: int = DASHBOARD_PORT,
+    open_browser: bool = True,
+) -> Optional[object]:
     """
     Start the aiohttp server as a background task. Returns the AppRunner
     on success, or ``None`` if aiohttp isn't installed.
+
+    ``open_browser`` (default True) opens the dashboard in the default
+    browser once the server is listening.
     """
     global _runner
     try:
@@ -1056,5 +1064,17 @@ async def start_dashboard(port: int = DASHBOARD_PORT) -> Optional[object]:
     site = web.TCPSite(runner, DASHBOARD_HOST, port)
     await site.start()
     _runner = runner
-    logger.info("Strategy dashboard live at http://%s:%d", DASHBOARD_HOST, port)
+    url = f"http://{DASHBOARD_HOST}:{port}/"
+    logger.info("Strategy dashboard live at %s", url)
+
+    if open_browser:
+        try:
+            # webbrowser.open is a blocking call on some platforms, so
+            # run it in the default executor to keep the event loop free.
+            import asyncio
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, webbrowser.open, url)
+        except Exception:
+            logger.warning("Could not open browser automatically; open %s manually.", url)
+
     return runner
