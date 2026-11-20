@@ -87,9 +87,20 @@ def make_hooks(viz: ModuleType) -> SimpleNamespace:
         case and the dashboard skips the stop-line render for that fire.
         """
         viz.record_fire(symbol, bar_time_local, bar_close, stop_level, ref_close)
+        
+    def on_stop(symbol: str, stop_level: float) -> None:
+        """
+        Publish the current planned stop level so the dashboard can draw it
+        before any fire happens. Strategies whose viz module has no
+        ``record_stop`` simply skip it.
+        """
+        record_stop = getattr(viz, "record_stop", None)
+        if record_stop is not None:
+            record_stop(symbol, stop_level)
 
     return SimpleNamespace(
         on_bar=on_bar,
         on_reference=on_reference,
+        on_stop=on_stop,
         on_fire=on_fire,
     )

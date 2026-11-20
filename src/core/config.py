@@ -45,6 +45,17 @@ class Settings(IBSourceConfig, BaseSettings):
     ORB_STOP_OFFSET: float
     RVOL_THRESHOLD: float
 
+    # --- Automatic execution via the 26 backend executor ---
+    # Master switch: arm the ORB order at IB when the opening range completes.
+    ORB_AUTO_EXECUTE: bool = True
+    EXECUTOR_BASE_URL: str = "http://127.0.0.1:8000/api/executor"
+    # Replay mode only logs what it would arm unless this is true.
+    EXECUTOR_IN_REPLAY: bool = True
+    # limit = trigger +/- ORB_LIMIT_OFFSET_R * R   (R = |trigger - stop|)
+    ORB_LIMIT_OFFSET_R: float = 0.5
+    # Added beyond the level so the trigger is a real break, not a touch.
+    ORB_TICK: float = 0.01
+
     TIMEZONE: str
 
     # --- Warmup data source ---

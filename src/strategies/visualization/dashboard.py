@@ -22,7 +22,7 @@ Merged snapshot shape returned by ``/api/state``:
           "reversal":           { ref_close, ref_low, ref_time, ref_field,
                                   filters, fires },
           "two_bar_breakentry": { ref_close, ref_low, ref_time, ref_field,
-                                  filters, fires },
+                                  stop_level, filters, fires },
           "vwap_cont":          { ref_close, ref_low, ref_time, ref_field,
                                   filters, fires }
         },
@@ -34,6 +34,10 @@ Merged snapshot shape returned by ``/api/state``:
     ``{id, label, passed, detail}`` dicts -- the JS renders one check
     row per entry, so add/remove/rethreshold a filter server-side and
     the UI follows on the next poll with no JS edit.
+
+    ``stop_level`` (optional, currently two_bar_breakentry only) is the
+    PLANNED stop published every tick while the setup is armed. Once a
+    fire exists, ``fires[-1].stop`` takes priority in the JS.
 
 Adding a new strategy's data pipe:
     1. Import its viz ``state`` module here; add its symbol-level fields
@@ -203,10 +207,13 @@ def _merged_snapshot() -> dict:
                 # anchor is that same window's min Low. Same
                 # ``filters`` / ``fires`` shape as every other strategy so
                 # the JS overlay + check-row helpers stay generic.
+                # ``stop_level`` is the planned stop published on every
+                # armed tick (before any fire).
                 "ref_time":          tb.get("ref_time"),
                 "ref_close":         tb.get("ref_close"),
                 "ref_low":           tb.get("ref_low"),
                 "ref_field":         tb.get("ref_field"),
+                "stop_level":        tb.get("stop_level"),
                 "filters":           tb.get("filters", []),
                 "fires":             tb.get("fires", []),
             },
@@ -596,14 +603,19 @@ function renderOverlays(card, strat, stopSuffix, direction, latestOnly) {
 
   const fires = strat.fires || [];
   const lf = fires.length ? fires[fires.length - 1] : null;
-  const stop = (lf && lf.stop != null) ? lf.stop : null;
+  // Fired stop wins; otherwise show the PLANNED stop if the strategy
+  // publishes one (strat.stop_level, e.g. two_bar_breakentry). Other
+  // strategies don't send stop_level, so they behave exactly as before.
+  const stop = (lf && lf.stop != null) ? lf.stop
+             : (strat.stop_level != null ? strat.stop_level : null);
   // Include the fire's timestamp in the stop signature so re-firing at
   // the SAME stop level (rare but possible when the window doesn't
   // move) still tears the old line down and redraws a fresh one --
   // otherwise ``stopSig`` wouldn't change and the "clean up before
   // adding the new one" contract would silently break for that case.
+  // ``lf`` is null while the stop is only planned.
   const stopSig = stop != null
-    ? (stop + '|' + (lf.ts || 0) + '|' + stopSuffix)
+    ? (stop + '|' + (lf ? (lf.ts || 0) : 0) + '|' + stopSuffix)
     : null;
   if (stopSig !== card.stopLineKey) {
     if (card.stopLine) card.series.removePriceLine(card.stopLine);
@@ -792,7 +804,8 @@ function updateReversalShortCard(card, sym) {
 // rolling max High of the last two finalized 2-min candles; the setup
 // filter is a recent-capitulation check. Same overlay contract as the
 // reversal/ORB cards -- ``ref_close`` draws the breakout line,
-// ``fires[-1].stop`` draws the stop line, the fire marker is a green
+// ``stop_level`` draws the PLANNED stop line while armed and
+// ``fires[-1].stop`` takes over once fired. The fire marker is an
 // up-arrow below the bar. One-shot per session (matches the server
 // latch), so we do NOT pass ``latestOnly`` -- the historical marker
 // stays where it fired.
@@ -817,7 +830,9 @@ function updateTwoBarBreakentryCard(card, sym) {
   q('.ref-c').textContent = tb.ref_close != null ? tb.ref_close.toFixed(2) : '--';
   q('.ref-t').textContent = tb.ref_time || '--';
   const lf = (tb.fires && tb.fires.length) ? tb.fires[tb.fires.length - 1] : null;
-  q('.stop-v').textContent = (lf && lf.stop != null) ? lf.stop.toFixed(2) : '--';
+  // Fired stop wins; otherwise show the planned stop.
+  const stopShown = (lf && lf.stop != null) ? lf.stop : tb.stop_level;
+  q('.stop-v').textContent = stopShown != null ? stopShown.toFixed(2) : '--';
 
   renderFilterChecks(card, tb.filters || []);
   updateChartCandles(card, sym);

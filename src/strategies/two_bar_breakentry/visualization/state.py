@@ -75,6 +75,8 @@ def record_reference(symbol, ref_time, ref_close, ref_low, field=None) -> None:
         STRATEGY_KEY, symbol, ref_time, ref_close, ref_low, field,
     )
 
+def record_stop(symbol: str, stop_level: float) -> None:
+    overlay_state.record_stop(STRATEGY_KEY, symbol, stop_level)
 
 def record_fire(symbol, bar_dt, close, stop_level, ref_close) -> None:
     overlay_state.record_fire(

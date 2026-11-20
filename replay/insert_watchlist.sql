@@ -11,7 +11,7 @@ TRUNCATE TABLE watchlist RESTART IDENTITY CASCADE;
 
 WITH w AS (
     INSERT INTO watchlist (symbol)
-    VALUES ('CRCL')
+    VALUES ('AMD')
     ON CONFLICT (symbol) DO UPDATE SET symbol = EXCLUDED.symbol
     RETURNING id
 )

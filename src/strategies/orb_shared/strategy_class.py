@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import time as _time
 from datetime import time
 from types import ModuleType, SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -11,9 +13,12 @@ from src.core.config import settings
 from src.database.db_functions import get_session_rows
 
 from src.helpers.handle_candles import stream_data_to_candle_row
+from src.orders.executor_client import arm_setup
 from src.strategies.actions import fire_signal
+from src.strategies.orb_shared.yesterday import yesterday_high, yesterday_low
 from src.strategies.hooks import make_hooks
 
+from .arming import build_arm_plan, get_premarket_extremes
 from .breakout_level import get_reference_from_opening_range
 from .detection import detect_breakout
 
@@ -53,6 +58,11 @@ class ORBStrategy:
 
         # Per-instance one-shot fire latch. Restart wipes it.
         self._fired: dict[str, bool] = {}
+
+        # Arming state per symbol: "inflight" | "done". A restart wipes it,
+        # which is safe: the executor is idempotent per setup_id.
+        self._arm_state: dict[str, str] = {}
+        self._arm_retry_at: dict[str, float] = {}
 
         # Human-readable prefix used in every log line so the two
         # directions are easy to tell apart in tail output.
@@ -123,6 +133,69 @@ class ORBStrategy:
         return round(ref_price + settings.ORB_STOP_OFFSET, 2)
 
     # ------------------------------------------------------------------
+    # Automatic execution: arm once per symbol per day
+    # ------------------------------------------------------------------
+
+    _ARM_RETRY_SECONDS = 15.0
+
+    def _maybe_arm(self, symbol: str, today, raw_ref) -> None:
+        """Schedule the arm without blocking the 5-sec bar loop."""
+        key = symbol.upper()
+        if self._arm_state.get(key) in ("inflight", "done"):
+            return
+        if self._arm_retry_at.get(key, 0.0) > _time.monotonic():
+            return
+        self._arm_state[key] = "inflight"
+        asyncio.get_running_loop().create_task(self._arm(symbol, today, raw_ref))
+
+    async def _arm(self, symbol: str, today, raw_ref) -> None:
+        key = symbol.upper()
+        try:
+            pm_high, pm_low = await get_premarket_extremes(symbol)
+            plan, reason = build_arm_plan(
+                symbol=symbol,
+                direction=self.direction,
+                day=today,
+                or_high=float(raw_ref.ref_close),   # OR high (raw, pre-swap)
+                or_low=float(raw_ref.ref_low),      # OR low
+                pm_high=pm_high,
+                pm_low=pm_low,
+                y_high=yesterday_high(symbol),
+                y_low=yesterday_low(symbol),
+                tick=settings.ORB_TICK,
+                stop_offset=settings.ORB_STOP_OFFSET,
+                limit_offset_r=settings.ORB_LIMIT_OFFSET_R,
+            )
+            if plan is None:
+                logger.info("%s: %s -- not arming: %s", self._log_prefix, symbol, reason)
+                self._arm_state[key] = "done"
+                return
+
+            logger.info(
+                "%s: %s -- ARM %s trigger=%.2f limit=%.2f stop=%.2f (DAY) | inputs %s",
+                self._log_prefix, symbol, plan.direction, plan.trigger, plan.limit,
+                plan.stop, plan.parts,
+            )
+
+            result = await arm_setup(plan.payload())
+            if result is None:
+                # Backend unreachable / 5xx: retry on a later bar.
+                self._arm_state.pop(key, None)
+                self._arm_retry_at[key] = _time.monotonic() + self._ARM_RETRY_SECONDS
+                return
+
+            self._arm_state[key] = "done"
+            logger.info(
+                "%s: %s -- executor answered: setup_id=%s ok=%s status=%s ib_status=%s message=%s",
+                self._log_prefix, symbol, result.get("setup_id"), result.get("ok"), result.get("status"),
+                result.get("ib_status"), result.get("message"),
+            )
+        except Exception:
+            logger.exception("%s: %s -- arming failed", self._log_prefix, symbol)
+            self._arm_state.pop(key, None)
+            self._arm_retry_at[key] = _time.monotonic() + self._ARM_RETRY_SECONDS
+
+    # ------------------------------------------------------------------
     # Main orchestrator (called once per 5-sec bar)
     # ------------------------------------------------------------------
 
@@ -167,6 +240,12 @@ class ORBStrategy:
 
         breakout_level = self._direction_reference(raw_ref)
         self.hooks.on_reference(symbol, breakout_level)
+
+        # --- Phase 2b: arm the order at IB (once, when the range is done) --
+        # Runs before the filter gate on purpose: the filters are folded
+        # into the trigger price, so IB only fills when they all hold.
+        if settings.ORB_AUTO_EXECUTE:
+            self._maybe_arm(symbol, today, raw_ref)
 
         # --- Phase 3: filter gate ----------------------------------------
         if not filters_passed:

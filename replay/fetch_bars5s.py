@@ -23,27 +23,27 @@ from pathlib import Path
 from ib_async import IB, Stock
 
 # ============ CONFIG ============
-SYMBOL      = "CRCL"
-DATE        = "2026-09-15"          # YYYY-MM-DD (local calendar date)
+SYMBOL      = "AMD"
+DATE        = "2026-11-19"          # YYYY-MM-DD (local calendar date)
 EXCHANGE    = "SMART"
 CURRENCY    = "USD"
 
 HOST        = "127.0.0.1"
-PORT        = 4001                  # 7497 paper TWS, 7496 live TWS, 4002/4001 gateway
+PORT        = 7496                  # 7497 paper TWS, 7496 live TWS, 4002/4001 gateway
 CLIENT_ID   = 20
 
 USE_RTH     = False                 # True = regular trading hours only
 TIMEZONE    = "Europe/Helsinki"     # output timestamp tz (matches settings.TIMEZONE)
 
 # Strategy row that gets attached to SYMBOL when the watchlist SQL is
-# regenerated at the end of the run. Keep in the CONFIG block so a single
-# edit to (SYMBOL, DATE, STRATEGY) drives the CSV name, the CSV contents,
-# and the watchlist row the replay run will actually pick up.
-STRATEGY    = 'two_bar_breakentry'
+STRATEGY    = "two_bar_breakentry"  # must match a strategy in src/strategies
+#   { value: "reversal_long", label: "reversal_long" },
+#   { value: "reversal_short", label: "reversal_short" },
+#   { value: "vwap_continuation_long", label: "vwap_continuation_long" },
+#   { value: "two_bar_breakentry", label: "two_bar_breakentry" },
+#   { value: "orb_breakout", label: "orb_breakout" },
+#   { value: "orb_breakdown", label: "orb_breadown" },
 
-# Hard-coded output directory + file. Every replay run points the streamer
-# at OUT_DIR, so we scrub *.csv there before fetching -- otherwise stale
-# files from previous symbols/dates would silently get replayed alongside
 # the new one.
 OUT_DIR = Path(r"C:\codebase\prod\22_WatchlistStreamer\replay")
 OUT_CSV = OUT_DIR / f"{SYMBOL}_{DATE}_5s.csv"

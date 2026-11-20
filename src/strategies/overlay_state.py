@@ -45,8 +45,8 @@ class OverlayState:
     ref_close: Optional[float] = None
     ref_low: Optional[float] = None
     ref_field: Optional[str] = None   # "open" | "high" | "low" | "close"
+    stop_level: Optional[float] = None
     updated_at: Optional[str] = None
-
 
 # Cap on the number of remembered fires per (strategy, symbol) per session.
 MAX_FIRES_PER_SYMBOL: int = 50
@@ -97,6 +97,11 @@ def record_reference(
     st.ref_field = field
     st.updated_at = candle_timeline.now_iso()
 
+
+def record_stop(strategy_key: str, symbol: str, stop_level: Optional[float]) -> None:
+    st = _overlay(strategy_key, symbol)
+    st.stop_level = float(stop_level) if stop_level is not None else None
+    st.updated_at = candle_timeline.now_iso()
 
 def record_fire(
     strategy_key: str,
@@ -179,6 +184,7 @@ def snapshot(
             "candles":        view["candles"],
             "fires":          list(strat_fires.get(sym, [])),
             "updated_at":     st.updated_at,
+            "stop_level":     st.stop_level,
         }
         if extra_symbol_fields is not None:
             entry.update(extra_symbol_fields(sym))
